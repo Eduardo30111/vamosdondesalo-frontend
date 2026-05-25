@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Vamos Donde Salo!</string>
+    <string name="title_activity_main">Vamos Donde Salo!</string>
+    <string name="package_name">co.salo.pos</string>
+    <string name="custom_url_scheme">co.salo.pos</string>
+</resources>

@@ -1,0 +1,151 @@
+'use client';
+
+import { useEffect, useState } from 'react';
+import { toast } from 'sonner';
+import { api } from '@/lib/api';
+import { formatCurrency } from '@/lib/utils';
+import { Plus, Pencil, Trash2, X, Package } from 'lucide-react';
+import Image from 'next/image';
+
+interface Product {
+  id: string;
+  name: string;
+  description: string | null;
+  photoUrl: string | null;
+  salePrice: number;
+  costPrice: number;
+  type: string;
+  supplierId: string | null;
+  dailyStock: number;
+}
+
+interface FormData {
+  name: string;
+  description: string;
+  photoUrl: string;
+  salePrice: number;
+  costPrice: number;
+  type: string;
+  dailyStock: number;
+}
+
+const emptyForm: FormData = { name: '', description: '', photoUrl: '', salePrice: 0, costPrice: 0, type: 'OWN', dailyStock: 50 };
+
+export default function ProductosPage() {
+  const [products, setProducts] = useState<Product[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [showForm, setShowForm] = useState(false);
+  const [editId, setEditId] = useState<string | null>(null);
+  const [form, setForm] = useState<FormData>(emptyForm);
+
+  useEffect(() => { loadProducts(); }, []);
+
+  const loadProducts = async () => {
+    try {
+      const data = await api.get<Product[]>('/products');
+      setProducts(data);
+    } catch (err: unknown) {
+      toast.error(err instanceof Error ? err.message : 'Error');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    try {
+      if (editId) {
+        await api.put(`/products/${editId}`, form);
+        toast.success('Producto actualizado');
+      } else {
+        await api.post('/products', form);
+        toast.success('Producto creado');
+      }
+      setShowForm(false);
+      setEditId(null);
+      setForm(emptyForm);
+      loadProducts();
+    } catch (err: unknown) {
+      toast.error(err instanceof Error ? err.message : 'Error');
+    }
+  };
+
+  const handleEdit = (p: Product) => {
+    setForm({ name: p.name, description: p.description || '', photoUrl: p.photoUrl || '', salePrice: p.salePrice, costPrice: p.costPrice, type: p.type, dailyStock: p.dailyStock });
+    setEditId(p.id);
+    setShowForm(true);
+  };
+
+  const handleDelete = async (id: string) => {
+    if (!confirm('¿Eliminar producto?')) return;
+    try {
+      await api.delete(`/products/${id}`);
+      toast.success('Producto eliminado');
+      loadProducts();
+    } catch (err: unknown) {
+      toast.error(err instanceof Error ? err.message : 'Error');
+    }
+  };
+
+  if (loading) {
+    return <div className="flex items-center justify-center h-96"><div className="animate-spin rounded-full h-12 w-12 border-b-2 border-salo-orange" /></div>;
+  }
+
+  return (
+    <div>
+      <div className="flex items-center justify-between mb-6">
+        <h1 className="text-2xl font-bold flex items-center gap-2"><Package className="text-salo-orange" /> Productos</h1>
+        <button onClick={() => { setForm(emptyForm); setEditId(null); setShowForm(true); }} className="px-4 py-2 bg-salo-orange text-white rounded-xl font-medium text-sm flex items-center gap-2 hover:bg-primary-700 transition">
+          <Plus size={18} /> Nuevo
+        </button>
+      </div>
+
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+        {products.map((p) => (
+          <div key={p.id} className="bg-white dark:bg-gray-800 rounded-2xl shadow-sm border border-gray-100 dark:border-gray-700 overflow-hidden">
+            <div className="aspect-video relative bg-gray-100 dark:bg-gray-700">
+              {p.photoUrl ? <Image src={p.photoUrl} alt={p.name} fill className="object-cover" sizes="300px" /> : <div className="w-full h-full flex items-center justify-center text-gray-400"><Package size={40} /></div>}
+            </div>
+            <div className="p-4">
+              <h3 className="font-bold text-sm truncate">{p.name}</h3>
+              <p className="text-xs text-gray-500 truncate">{p.description}</p>
+              <div className="flex justify-between items-center mt-2">
+                <span className="font-bold text-salo-orange">{formatCurrency(p.salePrice)}</span>
+                <span className="text-xs bg-gray-100 dark:bg-gray-700 px-2 py-0.5 rounded">{p.type}</span>
+              </div>
+              <div className="flex gap-2 mt-3">
+                <button onClick={() => handleEdit(p)} className="flex-1 py-1.5 text-xs bg-blue-50 dark:bg-blue-900/20 text-blue-600 rounded-lg font-medium flex items-center justify-center gap-1"><Pencil size={12} /> Editar</button>
+                <button onClick={() => handleDelete(p.id)} className="flex-1 py-1.5 text-xs bg-red-50 dark:bg-red-900/20 text-red-500 rounded-lg font-medium flex items-center justify-center gap-1"><Trash2 size={12} /> Eliminar</button>
+              </div>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {showForm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+          <div className="bg-white dark:bg-gray-800 rounded-2xl w-full max-w-md p-6 shadow-2xl max-h-[90vh] overflow-y-auto">
+            <div className="flex justify-between items-center mb-4">
+              <h3 className="text-lg font-bold">{editId ? 'Editar' : 'Nuevo'} Producto</h3>
+              <button onClick={() => setShowForm(false)}><X size={20} /></button>
+            </div>
+            <form onSubmit={handleSubmit} className="space-y-3">
+              <input type="text" placeholder="Nombre" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} className="w-full px-3 py-2 rounded-lg border border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 text-sm" required />
+              <input type="text" placeholder="Descripción" value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} className="w-full px-3 py-2 rounded-lg border border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 text-sm" />
+              <input type="url" placeholder="URL de foto" value={form.photoUrl} onChange={(e) => setForm({ ...form, photoUrl: e.target.value })} className="w-full px-3 py-2 rounded-lg border border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 text-sm" />
+              <div className="grid grid-cols-2 gap-3">
+                <div><label className="text-xs text-gray-500">Precio venta</label><input type="number" value={form.salePrice} onChange={(e) => setForm({ ...form, salePrice: +e.target.value })} className="w-full px-3 py-2 rounded-lg border border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 text-sm" min="0" required /></div>
+                <div><label className="text-xs text-gray-500">Precio costo</label><input type="number" value={form.costPrice} onChange={(e) => setForm({ ...form, costPrice: +e.target.value })} className="w-full px-3 py-2 rounded-lg border border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 text-sm" min="0" required /></div>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div><label className="text-xs text-gray-500">Tipo</label><select value={form.type} onChange={(e) => setForm({ ...form, type: e.target.value })} className="w-full px-3 py-2 rounded-lg border border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 text-sm"><option value="OWN">Propio</option><option value="SUPPLIER">Proveedor</option></select></div>
+                <div><label className="text-xs text-gray-500">Stock diario</label><input type="number" value={form.dailyStock} onChange={(e) => setForm({ ...form, dailyStock: +e.target.value })} className="w-full px-3 py-2 rounded-lg border border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 text-sm" min="0" required /></div>
+              </div>
+              <button type="submit" className="w-full py-3 rounded-xl bg-salo-orange text-white font-semibold hover:bg-primary-700 transition">{editId ? 'Actualizar' : 'Crear'} Producto</button>
+            </form>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}

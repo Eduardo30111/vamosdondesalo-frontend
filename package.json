@@ -1,0 +1,18 @@
+{
+  "name": "vamos-donde-salo",
+  "version": "1.0.0",
+  "private": true,
+  "packageManager": "pnpm@9.15.4",
+  "scripts": {
+    "dev": "docker compose up",
+    "build": "pnpm -r build",
+    "seed": "docker compose exec api pnpm run seed",
+    "db:migrate": "docker compose exec api pnpm run db:migrate",
+    "db:reset": "docker compose exec api pnpm run db:reset",
+    "db:studio": "docker compose exec api pnpm run db:studio",
+    "lint": "pnpm -r lint"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.0"
+  }
+}
