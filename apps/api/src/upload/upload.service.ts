@@ -4,14 +4,19 @@ import { Injectable, BadRequestException } from '@nestjs/common';
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const cloudinary = require('cloudinary').v2;
 
+const CLOUDINARY_PLACEHOLDER = 'https://via.placeholder.com/400x400?text=Sin+imagen';
+
 @Injectable()
 export class UploadService {
+  private configured: boolean;
+
   constructor() {
     const cloudName = process.env.CLOUDINARY_CLOUD_NAME;
     const apiKey = process.env.CLOUDINARY_API_KEY;
     const apiSecret = process.env.CLOUDINARY_API_SECRET;
+    this.configured = !!(cloudName && apiKey && apiSecret);
 
-    if (cloudName && apiKey && apiSecret) {
+    if (this.configured) {
       cloudinary.config({
         cloud_name: cloudName,
         api_key: apiKey,
@@ -20,9 +25,10 @@ export class UploadService {
     }
   }
 
-  async uploadImage(file: { mimetype: string; size: number; buffer: Buffer }): Promise<{ url: string }> {
-    if (!process.env.CLOUDINARY_CLOUD_NAME || !process.env.CLOUDINARY_API_KEY || !process.env.CLOUDINARY_API_SECRET) {
-      throw new BadRequestException('Cloudinary no está configurado. Configura CLOUDINARY_CLOUD_NAME, CLOUDINARY_API_KEY y CLOUDINARY_API_SECRET.');
+  async uploadImage(file: { mimetype: string; size: number; buffer: Buffer }): Promise<{ url: string; publicId: string }> {
+    if (!this.configured) {
+      console.warn('Cloudinary no configurado, retornando placeholder');
+      return { url: CLOUDINARY_PLACEHOLDER, publicId: 'placeholder' };
     }
 
     const allowedMimes = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
@@ -38,7 +44,7 @@ export class UploadService {
     return new Promise((resolve, reject) => {
       cloudinary.uploader.upload_stream(
         {
-          folder: 'vamos-donde-salo',
+          folder: 'salo/products',
           resource_type: 'image',
           transformation: [
             { width: 800, height: 800, crop: 'limit', quality: 'auto' },
@@ -48,7 +54,7 @@ export class UploadService {
           if (error || !result) {
             reject(new BadRequestException(error?.message || 'Error al subir imagen'));
           } else {
-            resolve({ url: result.secure_url });
+            resolve({ url: result.secure_url, publicId: result.public_id });
           }
         },
       ).end(file.buffer);

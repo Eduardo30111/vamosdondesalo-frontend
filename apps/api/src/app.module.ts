@@ -18,6 +18,8 @@ import { AccountingModule } from './accounting/accounting.module';
 import { AppConfigModule } from './app-config/app-config.module';
 import { UploadModule } from './upload/upload.module';
 import { HealthModule } from './health/health.module';
+import { DailyStockModule } from './daily-stock/daily-stock.module';
+import { KitchenProductionModule } from './kitchen-production/kitchen-production.module';
 
 @Module({
   imports: [
@@ -40,6 +42,8 @@ import { HealthModule } from './health/health.module';
     AppConfigModule,
     UploadModule,
     HealthModule,
+    DailyStockModule,
+    KitchenProductionModule,
   ],
 })
 export class AppModule {}

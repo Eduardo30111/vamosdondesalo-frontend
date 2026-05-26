@@ -16,9 +16,15 @@ export class CustomersController {
   }
 
   @Get('debtors')
-  @Roles('ADMIN')
+  @Roles('ADMIN', 'VENDEDOR')
   findDebtors() {
     return this.service.findDebtors();
+  }
+
+  @Get('morosos')
+  @Roles('ADMIN', 'VENDEDOR')
+  findMorosos() {
+    return this.service.findMorosos();
   }
 
   @Get('cedula/:cedula')
@@ -31,6 +37,12 @@ export class CustomersController {
   @Roles('ADMIN', 'VENDEDOR')
   findById(@Param('id') id: string) {
     return this.service.findById(id);
+  }
+
+  @Get(':id/history')
+  @Roles('ADMIN', 'VENDEDOR')
+  getHistory(@Param('id') id: string) {
+    return this.service.getHistory(id);
   }
 
   @Post()

@@ -9,6 +9,10 @@ export class TablesService {
     return this.prisma.table.findMany({ orderBy: { number: 'asc' } });
   }
 
+  findById(id: string) {
+    return this.prisma.table.findUnique({ where: { id } });
+  }
+
   findByToken(qrToken: string) {
     return this.prisma.table.findUnique({ where: { qrToken } });
   }

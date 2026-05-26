@@ -4,8 +4,8 @@ import { AppModule } from './app.module';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
-  
-  // CORS configurable por variable de entorno
+
+  // CORS: aceptar localhost, IPs locales, y cualquier origen en dev
   const frontendUrl = process.env.FRONTEND_URL;
   app.enableCors({
     origin: frontendUrl ? frontendUrl.split(',') : true,

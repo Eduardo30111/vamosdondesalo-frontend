@@ -98,6 +98,8 @@ export default function MesasPage() {
 
             <div className="flex gap-2">
               <button onClick={() => handleRegenerate(t.id)} className="flex-1 py-2 text-xs bg-blue-50 dark:bg-blue-900/20 text-blue-600 rounded-lg font-medium flex items-center justify-center gap-1"><RefreshCw size={12} /> Regenerar</button>
+              <a href={`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000'}/tables/${t.id}/qr`} download className="flex-1 py-2 text-xs bg-green-50 dark:bg-green-900/20 text-green-600 rounded-lg font-medium flex items-center justify-center gap-1"><Download size={12} /> PNG</a>
+              <a href={`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000'}/tables/${t.id}/qr?format=pdf`} download className="flex-1 py-2 text-xs bg-purple-50 dark:bg-purple-900/20 text-purple-600 rounded-lg font-medium flex items-center justify-center gap-1"><Download size={12} /> PDF</a>
               <button onClick={() => handleDelete(t.id)} className="py-2 px-3 text-xs bg-red-50 dark:bg-red-900/20 text-red-500 rounded-lg font-medium flex items-center justify-center gap-1"><Trash2 size={12} /></button>
             </div>
           </div>

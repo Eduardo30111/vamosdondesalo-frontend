@@ -25,11 +25,11 @@ import {
 } from 'recharts';
 
 interface DashboardStats {
+  totalSalesToday: number;
   ordersToday: number;
-  salesToday: number;
   activeOrders: number;
   profitToday: number;
-  activeDeliveries: number;
+  deliveryActive: number;
   topProducts: Array<{ name: string; count: number }>;
   weeklySales: Array<{ date: string; total: number }>;
   hourlyOrders: number[];
@@ -47,8 +47,18 @@ export default function AdminPage() {
 
   const loadStats = async () => {
     try {
-      const data = await api.get<DashboardStats>('/dashboard');
-      setStats(data);
+      const [statsData, weeklyData, hourlyData, topProductsData] = await Promise.all([
+        api.get<DashboardStats>('/dashboard/stats'),
+        api.get<Array<{ date: string; total: number }>>('/dashboard/weekly-chart'),
+        api.get<{ hourlyOrders: number[] }>('/dashboard/hourly'),
+        api.get<Array<{ name: string; count: number }>>('/dashboard/top-products'),
+      ]);
+      setStats({
+        ...statsData,
+        weeklySales: weeklyData,
+        hourlyOrders: hourlyData.hourlyOrders,
+        topProducts: topProductsData,
+      });
     } catch (err: unknown) {
       toast.error(err instanceof Error ? err.message : 'Error cargando dashboard');
     } finally {
@@ -69,7 +79,7 @@ export default function AdminPage() {
     orders: count,
   })).filter((_, i) => i >= 6 && i <= 22);
 
-  const weeklyData = stats.weeklySales.map(d => ({
+  const weeklyData = stats.weeklySales.map((d) => ({
     date: new Date(d.date).toLocaleDateString('es-CO', { weekday: 'short' }),
     total: d.total,
   }));
@@ -82,7 +92,7 @@ export default function AdminPage() {
       <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-4 mb-6">
         <MetricCard
           label="Ventas Hoy"
-          value={formatCurrency(stats.salesToday)}
+          value={formatCurrency(stats.totalSalesToday)}
           icon={DollarSign}
           color="text-green-500"
           bg="bg-green-50 dark:bg-green-900/20"
@@ -110,7 +120,7 @@ export default function AdminPage() {
         />
         <MetricCard
           label="Domicilios Activos"
-          value={String(stats.activeDeliveries)}
+          value={String(stats.deliveryActive)}
           icon={Bike}
           color="text-purple-500"
           bg="bg-purple-50 dark:bg-purple-900/20"
@@ -157,7 +167,7 @@ export default function AdminPage() {
 
       {/* Top Products */}
       <div className="bg-white dark:bg-gray-800 rounded-2xl p-5 shadow-sm border border-gray-100 dark:border-gray-700">
-        <h3 className="font-bold mb-4">Productos Más Vendidos (Hoy)</h3>
+        <h3 className="font-bold mb-4">Productos Mas Vendidos (Hoy)</h3>
         <div className="space-y-3">
           {stats.topProducts.map((product, i) => (
             <div key={i} className="flex items-center gap-3">

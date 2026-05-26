@@ -1,6 +1,7 @@
 import { Injectable, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { RealtimeGateway } from '../realtime/realtime.gateway';
+import { DailyStockService } from '../daily-stock/daily-stock.service';
 import { CreateOrderDto } from './dto/create-order.dto';
 
 @Injectable()
@@ -8,6 +9,7 @@ export class OrdersService {
   constructor(
     private prisma: PrismaService,
     private realtime: RealtimeGateway,
+    private dailyStock: DailyStockService,
   ) {}
 
   async findAll(status?: string) {
@@ -84,6 +86,15 @@ export class OrdersService {
 
     total += deliveryFee;
 
+    // Generate tracking code for delivery orders
+    let trackingCode: string | undefined;
+    if (dto.type === 'DELIVERY') {
+      const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+      let code = '';
+      for (let i = 0; i < 5; i++) code += chars.charAt(Math.floor(Math.random() * chars.length));
+      trackingCode = `SALO-${code}`;
+    }
+
     const order = await this.prisma.order.create({
       data: {
         type: dto.type as any,
@@ -95,6 +106,7 @@ export class OrdersService {
         deliveryFee,
         notes: dto.notes,
         total,
+        trackingCode,
         items: { create: items },
       },
       include: {
@@ -103,6 +115,11 @@ export class OrdersService {
         deliveryZone: true,
       },
     });
+
+    // Decrement daily stock
+    for (const item of items) {
+      await this.dailyStock.decrement(item.productId, item.qty);
+    }
 
     this.realtime.emitOrderCreated(order);
     return order;

@@ -20,6 +20,31 @@ export class CustomersService {
     });
   }
 
+  async getHistory(customerId: string) {
+    return this.prisma.credit.findMany({
+      where: { customerId },
+      include: { order: true },
+      orderBy: { createdAt: 'desc' },
+    });
+  }
+
+  async findMorosos() {
+    const thirtyDaysAgo = new Date();
+    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+    const customers = await this.prisma.customer.findMany({
+      where: { totalDebt: { gt: 0 } },
+      include: { credits: { orderBy: { createdAt: 'desc' } } },
+      orderBy: { totalDebt: 'desc' },
+    });
+    return customers.filter((c) => {
+      const lastPayment = c.credits.find((cr) => cr.type === 'PAYMENT');
+      const lastCharge = c.credits.find((cr) => cr.type === 'CHARGE');
+      const lastActivity = lastPayment || lastCharge;
+      if (!lastActivity) return true;
+      return new Date(lastActivity.createdAt) < thirtyDaysAgo;
+    });
+  }
+
   async findByCedula(cedula: string) {
     return this.prisma.customer.findUnique({ where: { cedula } });
   }
