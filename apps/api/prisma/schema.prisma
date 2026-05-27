@@ -107,6 +107,7 @@ model Order {
   deliveryZoneId  String?
   deliveryFee     Float       @default(0)
   status          OrderStatus @default(PAID)
+  isFiated        Boolean     @default(false)
   notes           String?
   total           Float
   createdAt       DateTime    @default(now())

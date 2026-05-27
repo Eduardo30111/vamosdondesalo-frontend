@@ -30,6 +30,13 @@ export default function VitrinaPage() {
   const [orders, setOrders] = useState<Order[]>([]);
   const [expanded, setExpanded] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [showFiarModal, setShowFiarModal] = useState(false);
+  const [fiarOrderId, setFiarOrderId] = useState<string | null>(null);
+  const [fiarTotal, setFiarTotal] = useState(0);
+  const [cedula, setCedula] = useState('');
+  const [foundCustomer, setFoundCustomer] = useState<any>(null);
+  const [newCustomerName, setNewCustomerName] = useState('');
+  const [newCustomerPhone, setNewCustomerPhone] = useState('');
 
   useEffect(() => {
     hydrate();
@@ -60,6 +67,36 @@ export default function VitrinaPage() {
     fetchOrders();
   };
 
+  const abrirFiar = (orderId: string, total: number) => {
+    setFiarOrderId(orderId);
+    setFiarTotal(total);
+    setShowFiarModal(true);
+    setCedula('');
+    setFoundCustomer(null);
+    setNewCustomerName('');
+    setNewCustomerPhone('');
+  };
+
+  const buscarCedula = async () => {
+    if (!cedula.trim()) return;
+    try { const { data } = await api.get(`/customers/cedula/${cedula}`); setFoundCustomer(data); }
+    catch { setFoundCustomer(null); }
+  };
+
+  const fiar = async () => {
+    if (!fiarOrderId) return;
+    let customerId = foundCustomer?.id;
+    if (!customerId) {
+      if (!newCustomerName.trim() || cedula.length < 5) { alert('Ingresa nombre y cedula'); return; }
+      const { data } = await api.post('/customers', { name: newCustomerName, cedula, phone: newCustomerPhone });
+      customerId = data.id;
+    }
+    await api.post(`/customers/${customerId}/charge`, { amount: fiarTotal });
+    await api.put(`/orders/${fiarOrderId}/fiar`, { customerId });
+    setShowFiarModal(false);
+    fetchOrders();
+  };
+
   const minutosDesde = (date: string) => {
     const diff = Date.now() - new Date(date).getTime();
     return Math.floor(diff / 60000);
@@ -69,8 +106,34 @@ export default function VitrinaPage() {
 
   return (
     <div className="p-4 md:p-8 max-w-5xl mx-auto">
-      <h1 className="text-2xl font-bold mb-6">Vitrina — Cuentas Activas</h1>
-      <p className="text-sm text-gray-500 mb-4">Pedidos entregados que esperan pago.</p>
+      <h1 className="text-2xl font-bold mb-2">Vitrina — Cuentas Activas</h1>
+      <p className="text-sm text-gray-500 mb-6">Pedidos entregados esperando pago o fiado.</p>
+
+      {/* Modal Fiar */}
+      {showFiarModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50">
+          <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-full max-w-md p-6 relative">
+            <button onClick={() => setShowFiarModal(false)} className="absolute top-4 right-4 p-1"><X size={20} /></button>
+            <h2 className="text-lg font-bold mb-4">Fiar pedido — ${fiarTotal.toLocaleString('es-CO')}</h2>
+            <div className="space-y-3">
+              <input type="text" placeholder="Cedula del cliente" value={cedula} onChange={(e) => setCedula(e.target.value)} onBlur={buscarCedula} className="w-full px-4 py-3 rounded-xl border border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 text-sm" />
+              {foundCustomer ? (
+                <div className="bg-green-50 dark:bg-green-900/20 p-3 rounded-xl text-sm">
+                  <p className="font-bold">{foundCustomer.name}</p>
+                  <p className="text-gray-500">Deuda actual: ${foundCustomer.totalDebt.toLocaleString('es-CO')}</p>
+                </div>
+              ) : (
+                <>
+                  <input type="text" placeholder="Nombre del cliente (nuevo)" value={newCustomerName} onChange={(e) => setNewCustomerName(e.target.value)} className="w-full px-4 py-3 rounded-xl border border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 text-sm" />
+                  <input type="tel" placeholder="Telefono (opcional)" value={newCustomerPhone} onChange={(e) => setNewCustomerPhone(e.target.value)} className="w-full px-4 py-3 rounded-xl border border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 text-sm" />
+                  <p className="text-xs text-gray-400">Cliente nuevo — se creara automaticamente</p>
+                </>
+              )}
+              <button onClick={fiar} className="w-full py-3 bg-yellow-500 text-white rounded-xl font-bold hover:opacity-90 text-sm">Confirmar Fiado</button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {loading ? (
         <div className="text-center py-12">Cargando...</div>
@@ -127,7 +190,7 @@ export default function VitrinaPage() {
                       <button onClick={() => pagar(o.id)} className="flex-1 py-2 bg-green-500 text-white rounded-lg font-bold text-sm hover:opacity-90 flex items-center justify-center gap-1">
                         <DollarSign size={16} /> Cobrar
                       </button>
-                      <button className="px-3 py-2 bg-yellow-500 text-white rounded-lg font-bold text-sm hover:opacity-90">
+                      <button onClick={() => abrirFiar(o.id, o.total)} className="px-3 py-2 bg-yellow-500 text-white rounded-lg font-bold text-sm hover:opacity-90">
                         <CreditCard size={16} /> Fiado
                       </button>
                       <button className="px-3 py-2 bg-blue-500 text-white rounded-lg font-bold text-sm hover:opacity-90">

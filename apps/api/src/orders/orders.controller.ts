@@ -53,6 +53,12 @@ export class OrdersController {
     return this.ordersService.create(dto);
   }
 
+  @Put(':id/fiar')
+  @Roles('ADMIN', 'VENDEDOR')
+  fiar(@Param('id') id: string, @Body() body: { customerId: string }) {
+    return this.ordersService.fiar(id, body.customerId);
+  }
+
   @Put(':id/pagar')
   @Roles('ADMIN', 'VENDEDOR')
   pagar(@Param('id') id: string) {

@@ -178,10 +178,18 @@ export class OrdersService {
     return order;
   }
 
+  async fiar(id: string, customerId: string) {
+    return this.prisma.order.update({
+      where: { id },
+      data: { status: 'PAID', isFiated: true, updatedAt: new Date() },
+      include: { items: { include: { product: true } } },
+    });
+  }
+
   async pagar(id: string) {
     return this.prisma.order.update({
       where: { id },
-      data: { status: 'PAID', updatedAt: new Date() },
+      data: { status: 'PAID', isFiated: false, updatedAt: new Date() },
       include: { items: { include: { product: true } } },
     });
   }
