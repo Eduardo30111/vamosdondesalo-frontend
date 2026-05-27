@@ -23,6 +23,7 @@ import {
   Receipt,
   Calculator,
   Settings,
+  Store,
 } from 'lucide-react';
 import { useState, useEffect } from 'react';
 
@@ -111,6 +112,13 @@ export function Sidebar() {
       </nav>
 
       <div className="p-3 border-t border-gray-200 dark:border-gray-700 space-y-1">
+        <Link
+          href="/landing"
+          className="flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium w-full text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition"
+        >
+          <Store size={20} />
+          Ver Landing
+        </Link>
         <button
           onClick={toggleDark}
           className="flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium w-full text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition"

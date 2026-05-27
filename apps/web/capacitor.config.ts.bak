@@ -7,7 +7,7 @@ const config: CapacitorConfig = {
   server: {
     // Para emulador Android: 10.0.2.2 siempre apunta al host (tu Mac)
     // Para dispositivo real: usa la IP local de tu Mac
-    url: 'http://10.0.2.2:3000',
+    url: 'http://192.168.80.17:3000',
     cleartext: true,
   },
   android: {

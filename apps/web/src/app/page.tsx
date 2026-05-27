@@ -3,6 +3,7 @@
 import { useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuthStore } from '@/store/auth';
+import LandingPage from './landing/page';
 
 export default function HomePage() {
   const router = useRouter();
@@ -27,11 +28,13 @@ export default function HomePage() {
         default:
           router.push('/login');
       }
-    } else {
-      const token = localStorage.getItem('token');
-      if (!token) router.push('/login');
     }
   }, [user, router]);
+
+  // Si no hay usuario logueado, mostrar landing page
+  if (!user) {
+    return <LandingPage />;
+  }
 
   return (
     <div className="min-h-screen flex items-center justify-center">

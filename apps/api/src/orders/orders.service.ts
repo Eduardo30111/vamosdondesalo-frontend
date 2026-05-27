@@ -64,6 +64,7 @@ export class OrdersService {
   async create(dto: CreateOrderDto) {
     const products = await this.prisma.product.findMany({
       where: { id: { in: dto.items.map((i) => i.productId) } },
+      select: { id: true, salePrice: true, isPrepared: true },
     });
 
     const productMap = new Map(products.map((p) => [p.id, p]));
@@ -95,6 +96,15 @@ export class OrdersService {
       trackingCode = `SALO-${code}`;
     }
 
+    // Determine initial status based on products
+    // Si ALGÚN producto necesita preparación → PENDING (cocina)
+    // Si TODOS son NO preparados → READY (directo al vendedor)
+    const hasPreparedItem = items.some(item => {
+      const product = productMap.get(item.productId);
+      return product ? (product as any).isPrepared ?? true : true;
+    });
+    const initialStatus = hasPreparedItem ? 'PENDING' : 'READY';
+
     const order = await this.prisma.order.create({
       data: {
         type: dto.type as any,
@@ -107,6 +117,7 @@ export class OrdersService {
         notes: dto.notes,
         total,
         trackingCode,
+        status: initialStatus as any,
         items: { create: items },
       },
       include: {

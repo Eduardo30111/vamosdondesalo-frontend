@@ -91,6 +91,7 @@ model Product {
   salePrice   Float
   costPrice   Float
   type        ProductType
+  isPrepared  Boolean     @default(true)
   supplierId  String?
   supplier    Supplier?   @relation(fields: [supplierId], references: [id])
   dailyStock  Int         @default(50)
