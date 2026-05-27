@@ -7,39 +7,68 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-enum UserRole { ADMIN VENDEDOR COCINA }
-enum OrderType { TABLE TAKEAWAY DELIVERY }
-enum OrderStatus { PENDING PREPARING READY DELIVERED PAID }
-enum PreparationMode { VITRINA PREPARADO }
+enum UserRole {
+  ADMIN
+  VENDEDOR
+  COCINA
+}
+
+enum OrderType {
+  TABLE
+  TAKEAWAY
+  DELIVERY
+}
+
+enum OrderStatus {
+  PENDING
+  PREPARING
+  READY
+  DELIVERED
+  PAID
+  CANCELLED
+}
+
+enum PreparationMode {
+  VITRINA
+  PREPARADO
+}
 
 model User {
-  id           String     @id @default(dbgenerated("gen_random_uuid()"))
+  id           String   @id @default(dbgenerated("gen_random_uuid()"))
   name         String
-  email        String     @unique
+  email        String   @unique
   passwordHash String
   role         UserRole
-  createdAt    DateTime   @default(now())
-  updatedAt    DateTime   @default(now())
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
 }
 
 model Product {
-  id              String           @id @default(dbgenerated("gen_random_uuid()"))
+  id              String          @id @default(dbgenerated("gen_random_uuid()"))
   name            String
   description     String?
   photoUrl        String?
   salePrice       Float
   costPrice       Float
-  type            String           // SUPPLIER OWN
-  preparationMode PreparationMode  @default(VITRINA)
-  active          Boolean          @default(true)
-  createdAt       DateTime         @default(now())
-  updatedAt       DateTime         @default(now())
+  type            String          // OWN | SUPPLIER
+  preparationMode PreparationMode @default(VITRINA)
+  active          Boolean         @default(true)
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+
+  supplierId       String?
+  supplier         Supplier?        @relation(fields: [supplierId], references: [id])
+  vitrinaStock     VitrinaStock?
+  productionOrders ProductionOrder[]
+  orderItems       OrderItem[]
+  wastes           Waste[]
 }
 
 model VitrinaStock {
-  id        String   @id @default(dbgenerated("gen_random_uuid()"))
-  productId String   @unique
-  qty       Int      @default(0)
+  id        String  @id @default(dbgenerated("gen_random_uuid()"))
+  productId String  @unique
+  qty       Int     @default(0)
+  product   Product @relation(fields: [productId], references: [id], onDelete: Cascade)
 }
 
 model ProductionOrder {
@@ -49,12 +78,14 @@ model ProductionOrder {
   readyQty     Int      @default(0)
   userId       String
   createdAt    DateTime @default(now())
+  product      Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
 }
 
 model Table {
-  id       String  @id @default(dbgenerated("gen_random_uuid()"))
-  number   Int     @unique
-  qrToken  String  @unique @default(dbgenerated("gen_random_uuid()"))
+  id      String  @id @default(dbgenerated("gen_random_uuid()"))
+  number  Int     @unique
+  qrToken String  @unique @default(dbgenerated("gen_random_uuid()"))
+  orders  Order[]
 }
 
 model DeliveryZone {
@@ -62,40 +93,57 @@ model DeliveryZone {
   name    String
   fee     Float
   enabled Boolean @default(true)
+  orders  Order[]
 }
 
 model Order {
-  id              String       @id @default(dbgenerated("gen_random_uuid()"))
+  id              String      @id @default(dbgenerated("gen_random_uuid()"))
   type            OrderType
-  trackingCode    String?      @unique
+  trackingCode    String?     @unique
   tableId         String?
   customerName    String
   customerPhone   String?
   customerAddress String?
   deliveryZoneId  String?
-  deliveryFee     Float        @default(0)
-  status          OrderStatus  @default(PAID)
+  deliveryFee     Float       @default(0)
+  status          OrderStatus @default(PAID)
   notes           String?
   total           Float
-  createdAt       DateTime     @default(now())
+  createdAt       DateTime    @default(now())
+  updatedAt       DateTime    @updatedAt
+
+  table        Table?        @relation(fields: [tableId], references: [id])
+  deliveryZone DeliveryZone? @relation(fields: [deliveryZoneId], references: [id])
+  items        OrderItem[]
+  payments     Payment[]
 }
 
 model OrderItem {
-  id        String   @id @default(dbgenerated("gen_random_uuid()"))
+  id        String  @id @default(dbgenerated("gen_random_uuid()"))
   orderId   String
   productId String
   qty       Int
   unitPrice Float
   notes     String?
-  isPrep    Boolean  @default(false)
+  isPrep    Boolean @default(false)
+
+  order   Order   @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  product Product @relation(fields: [productId], references: [id])
 }
 
 model Payment {
-  id       String   @id @default(dbgenerated("gen_random_uuid()"))
-  orderId  String
-  method   String
-  amount   Float
+  id        String   @id @default(dbgenerated("gen_random_uuid()"))
+  orderId   String
+  method    String
+  amount    Float
   createdAt DateTime @default(now())
+
+  order Order @relation(fields: [orderId], references: [id], onDelete: Cascade)
+}
+
+model AppConfig {
+  key   String @id
+  value String
 }
 
 model PaymentMethodConfig {
@@ -105,17 +153,20 @@ model PaymentMethodConfig {
   enabled Boolean @default(true)
 }
 
-model AppConfig {
-  key   String @id
-  value String
+model Supplier {
+  id       String    @id @default(dbgenerated("gen_random_uuid()"))
+  name     String
+  phone    String?
+  products Product[]
 }
 
 model Customer {
-  id         String   @id @default(dbgenerated("gen_random_uuid()"))
-  name       String
-  cedula     String   @unique
-  phone      String?
-  totalDebt  Float    @default(0)
+  id        String   @id @default(dbgenerated("gen_random_uuid()"))
+  name      String
+  cedula    String   @unique
+  phone     String?
+  totalDebt Float    @default(0)
+  credits   Credit[]
 }
 
 model Credit {
@@ -124,6 +175,7 @@ model Credit {
   amount     Float
   type       String
   createdAt  DateTime @default(now())
+  customer   Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
 }
 
 model Expense {
@@ -132,6 +184,7 @@ model Expense {
   amount   Float
   type     String
   date     DateTime @default(now())
+  userId   String?
 }
 
 model CashClose {
@@ -142,19 +195,12 @@ model CashClose {
   difference   Float
 }
 
-model DailyStock {
-  id        String   @id @default(dbgenerated("gen_random_uuid()"))
-  date      DateTime @db.Date
-  productId String
-  initialQty Int
-  userId     String
-  @@unique([date, productId])
-}
-
 model Waste {
   id        String   @id @default(dbgenerated("gen_random_uuid()"))
   productId String
   qty       Int
   reason    String
+  userId    String
   createdAt DateTime @default(now())
+  product   Product  @relation(fields: [productId], references: [id])
 }

@@ -38,7 +38,7 @@ export class PublicController {
   async getConfig() {
     const configs = await this.prisma.appConfig.findMany();
     const map: Record<string, string> = {};
-    configs.forEach(c => { map[c.key] = c.value; });
+    configs.forEach((c) => { map[c.key] = c.value; });
     return map;
   }
 
@@ -76,27 +76,15 @@ export class PublicController {
   }
 
   private async getAvailableProducts() {
-    const date = new Date();
-    date.setHours(0, 0, 0, 0);
-    const dailyStocks = await this.prisma.dailyStock.findMany({
-      where: { date, remaining: { gt: 0 } },
-      include: { product: true },
+    const products = await this.prisma.product.findMany({
+      where: { active: true, preparationMode: 'VITRINA' },
+      include: { vitrinaStock: true },
+      orderBy: { name: 'asc' },
     });
-    const stocksMap = new Map(dailyStocks.map(s => [s.productId, s.remaining]));
-    // Add kitchen ready production
-    const productions = await this.prisma.kitchenProduction.findMany({
-      where: { status: 'PREPARING' },
-      include: { product: true },
-    });
-    for (const kp of productions) {
-      const existing = stocksMap.get(kp.productId) ?? 0;
-      stocksMap.set(kp.productId, existing + kp.readyQty);
-    }
-    const allProducts = await this.prisma.product.findMany({ where: { active: true }, orderBy: { name: 'asc' } });
-    return allProducts
+    return products
       .map((p) => {
-        const remaining = stocksMap.get(p.id) ?? p.dailyStock;
-        return { ...p, remaining, hasStock: remaining > 0 };
+        const qty = p.vitrinaStock?.qty ?? 0;
+        return { ...p, remaining: qty, hasStock: qty > 0 };
       })
       .filter((p) => p.hasStock);
   }

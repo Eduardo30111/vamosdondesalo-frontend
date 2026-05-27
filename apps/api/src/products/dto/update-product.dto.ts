@@ -27,12 +27,11 @@ export class UpdateProductDto {
   @IsOptional()
   type?: string;
 
+  @IsEnum(['VITRINA', 'PREPARADO'])
+  @IsOptional()
+  preparationMode?: string;
+
   @IsString()
   @IsOptional()
   supplierId?: string;
-
-  @IsNumber()
-  @Min(0)
-  @IsOptional()
-  dailyStock?: number;
 }

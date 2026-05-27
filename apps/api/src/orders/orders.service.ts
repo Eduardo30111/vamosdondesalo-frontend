@@ -1,7 +1,6 @@
 import { Injectable, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { RealtimeGateway } from '../realtime/realtime.gateway';
-import { DailyStockService } from '../daily-stock/daily-stock.service';
 import { CreateOrderDto } from './dto/create-order.dto';
 
 @Injectable()
@@ -9,7 +8,6 @@ export class OrdersService {
   constructor(
     private prisma: PrismaService,
     private realtime: RealtimeGateway,
-    private dailyStock: DailyStockService,
   ) {}
 
   async findAll(status?: string) {
@@ -27,10 +25,42 @@ export class OrdersService {
   }
 
   async findActive() {
+    // Cuentas activas = pedidos NO pagados
     return this.prisma.order.findMany({
-      where: { status: { in: ['PENDING', 'PREPARING', 'READY', 'IN_TRANSIT'] } },
+      where: { status: { in: ['PENDING', 'PREPARING', 'READY', 'DELIVERED'] } },
       include: {
         items: { include: { product: true } },
+        table: true,
+        deliveryZone: true,
+        payments: true,
+      },
+      orderBy: { createdAt: 'asc' },
+    });
+  }
+
+  async findCuentasActivas() {
+    // Pedidos entregados pero NO pagados → esperan cobro
+    return this.prisma.order.findMany({
+      where: { status: { in: ['DELIVERED', 'READY'] } },
+      include: {
+        items: { include: { product: true } },
+        table: true,
+        deliveryZone: true,
+        payments: true,
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+  }
+
+  async findCocina() {
+    // Solo pedidos PREPARADO que están en cocina
+    return this.prisma.order.findMany({
+      where: { status: { in: ['PENDING', 'PREPARING', 'READY'] } },
+      include: {
+        items: {
+          where: { isPrep: true },
+          include: { product: true },
+        },
         table: true,
         deliveryZone: true,
       },
@@ -40,7 +70,7 @@ export class OrdersService {
 
   async findDeliveries() {
     return this.prisma.order.findMany({
-      where: { type: 'DELIVERY', status: { in: ['PENDING', 'PREPARING', 'READY', 'IN_TRANSIT'] } },
+      where: { type: 'DELIVERY', status: { in: ['PENDING', 'PREPARING', 'READY', 'DELIVERED'] } },
       include: {
         items: { include: { product: true } },
         deliveryZone: true,
@@ -64,7 +94,7 @@ export class OrdersService {
   async create(dto: CreateOrderDto) {
     const products = await this.prisma.product.findMany({
       where: { id: { in: dto.items.map((i) => i.productId) } },
-      select: { id: true, salePrice: true, isPrepared: true },
+      include: { vitrinaStock: true },
     });
 
     const productMap = new Map(products.map((p) => [p.id, p]));
@@ -75,7 +105,13 @@ export class OrdersService {
       if (!product) throw new BadRequestException(`Producto ${item.productId} no encontrado`);
       const unitPrice = product.salePrice;
       total += unitPrice * item.qty;
-      return { productId: item.productId, qty: item.qty, unitPrice, notes: item.notes };
+      return {
+        productId: item.productId,
+        qty: item.qty,
+        unitPrice,
+        notes: item.notes,
+        isPrep: product.preparationMode === 'PREPARADO',
+      };
     });
 
     // Calculate delivery fee
@@ -96,14 +132,9 @@ export class OrdersService {
       trackingCode = `SALO-${code}`;
     }
 
-    // Determine initial status based on products
-    // Si ALGÚN producto necesita preparación → PENDING (cocina)
-    // Si TODOS son NO preparados → READY (directo al vendedor)
-    const hasPreparedItem = items.some(item => {
-      const product = productMap.get(item.productId);
-      return product ? (product as any).isPrepared ?? true : true;
-    });
-    const initialStatus = hasPreparedItem ? 'PENDING' : 'READY';
+    // Reglas VITRINA vs PREPARADO
+    const hasPrepItem = items.some((item) => item.isPrep);
+    const initialStatus = hasPrepItem ? 'PENDING' : 'PAID';
 
     const order = await this.prisma.order.create({
       data: {
@@ -127,13 +158,53 @@ export class OrdersService {
       },
     });
 
-    // Decrement daily stock
-    for (const item of items) {
-      await this.dailyStock.decrement(item.productId, item.qty);
+    // Si no tiene items preparados (todos vitrina), descontar stock vitrina
+    if (!hasPrepItem) {
+      for (const item of items) {
+        const product = productMap.get(item.productId);
+        if (product && product.preparationMode === 'VITRINA') {
+          await this.prisma.vitrinaStock.updateMany({
+            where: { productId: item.productId },
+            data: { qty: { decrement: item.qty } },
+          });
+        }
+      }
+      this.realtime.server.emit('vitrina:updated', { orderId: order.id });
+    } else {
+      // Emitir a cocina
+      this.realtime.emitOrderCreated(order);
     }
 
-    this.realtime.emitOrderCreated(order);
     return order;
+  }
+
+  async pagar(id: string) {
+    return this.prisma.order.update({
+      where: { id },
+      data: { status: 'PAID', updatedAt: new Date() },
+      include: { items: { include: { product: true } } },
+    });
+  }
+
+  async cancelar(id: string) {
+    const order = await this.prisma.order.findUnique({ where: { id }, include: { items: true } });
+    if (!order) throw new Error('Pedido no encontrado');
+    
+    // Devolver stock vitrina si aplica
+    for (const item of order.items) {
+      if (!item.isPrep) {
+        await this.prisma.vitrinaStock.updateMany({
+          where: { productId: item.productId },
+          data: { qty: { increment: item.qty } },
+        });
+      }
+    }
+    
+    return this.prisma.order.update({
+      where: { id },
+      data: { status: 'CANCELLED', updatedAt: new Date() },
+      include: { items: { include: { product: true } } },
+    });
   }
 
   async updateStatus(id: string, status: string) {

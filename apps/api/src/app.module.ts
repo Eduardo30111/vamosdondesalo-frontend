@@ -18,8 +18,7 @@ import { AccountingModule } from './accounting/accounting.module';
 import { AppConfigModule } from './app-config/app-config.module';
 import { UploadModule } from './upload/upload.module';
 import { HealthModule } from './health/health.module';
-import { DailyStockModule } from './daily-stock/daily-stock.module';
-import { KitchenProductionModule } from './kitchen-production/kitchen-production.module';
+import { ProductionOrdersModule } from './production-orders/production-orders.module';
 
 @Module({
   imports: [
@@ -42,8 +41,7 @@ import { KitchenProductionModule } from './kitchen-production/kitchen-production
     AppConfigModule,
     UploadModule,
     HealthModule,
-    DailyStockModule,
-    KitchenProductionModule,
+    ProductionOrdersModule,
   ],
 })
 export class AppModule {}

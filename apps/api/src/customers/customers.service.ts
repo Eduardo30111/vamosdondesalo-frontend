@@ -23,7 +23,6 @@ export class CustomersService {
   async getHistory(customerId: string) {
     return this.prisma.credit.findMany({
       where: { customerId },
-      include: { order: true },
       orderBy: { createdAt: 'desc' },
     });
   }
@@ -52,7 +51,7 @@ export class CustomersService {
   async findById(id: string) {
     return this.prisma.customer.findUniqueOrThrow({
       where: { id },
-      include: { credits: { orderBy: { createdAt: 'desc' }, include: { order: true } } },
+      include: { credits: { orderBy: { createdAt: 'desc' } } },
     });
   }
 
@@ -65,10 +64,10 @@ export class CustomersService {
     });
   }
 
-  async charge(customerId: string, amount: number, orderId?: string, note?: string) {
+  async charge(customerId: string, amount: number) {
     const [credit] = await this.prisma.$transaction([
       this.prisma.credit.create({
-        data: { customerId, amount, type: 'CHARGE', orderId, note },
+        data: { customerId, amount, type: 'CHARGE' },
       }),
       this.prisma.customer.update({
         where: { id: customerId },
@@ -78,12 +77,12 @@ export class CustomersService {
     return credit;
   }
 
-  async payment(customerId: string, amount: number, note?: string) {
+  async payment(customerId: string, amount: number) {
     const customer = await this.prisma.customer.findUniqueOrThrow({ where: { id: customerId } });
     const actualAmount = Math.min(amount, customer.totalDebt);
     const [credit] = await this.prisma.$transaction([
       this.prisma.credit.create({
-        data: { customerId, amount: actualAmount, type: 'PAYMENT', note },
+        data: { customerId, amount: actualAmount, type: 'PAYMENT' },
       }),
       this.prisma.customer.update({
         where: { id: customerId },

@@ -23,6 +23,18 @@ export class OrdersController {
     return this.ordersService.findActive();
   }
 
+  @Get('cuentas-activas')
+  @Roles('ADMIN', 'VENDEDOR')
+  findCuentasActivas() {
+    return this.ordersService.findCuentasActivas();
+  }
+
+  @Get('cocina')
+  @Roles('ADMIN', 'VENDEDOR', 'COCINA')
+  findCocina() {
+    return this.ordersService.findCocina();
+  }
+
   @Get('deliveries')
   @Roles('ADMIN', 'VENDEDOR')
   findDeliveries() {
@@ -39,6 +51,18 @@ export class OrdersController {
   @Roles('ADMIN', 'VENDEDOR')
   create(@Body() dto: CreateOrderDto) {
     return this.ordersService.create(dto);
+  }
+
+  @Put(':id/pagar')
+  @Roles('ADMIN', 'VENDEDOR')
+  pagar(@Param('id') id: string) {
+    return this.ordersService.pagar(id);
+  }
+
+  @Put(':id/cancelar')
+  @Roles('ADMIN', 'VENDEDOR')
+  cancelar(@Param('id') id: string) {
+    return this.ordersService.cancelar(id);
   }
 
   @Put(':id/status')

@@ -11,6 +11,7 @@ import {
   Activity,
   Bike,
   Package,
+  Warehouse,
 } from 'lucide-react';
 import {
   BarChart,
@@ -35,8 +36,17 @@ interface DashboardStats {
   hourlyOrders: number[];
 }
 
+interface VitrinaItem {
+  id: string;
+  name: string;
+  photoUrl: string | null;
+  preparationMode: string;
+  vitrinaStock: { qty: number } | null;
+}
+
 export default function AdminPage() {
   const [stats, setStats] = useState<DashboardStats | null>(null);
+  const [vitrina, setVitrina] = useState<VitrinaItem[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -47,11 +57,12 @@ export default function AdminPage() {
 
   const loadStats = async () => {
     try {
-      const [statsData, weeklyData, hourlyData, topProductsData] = await Promise.all([
+      const [statsData, weeklyData, hourlyData, topProductsData, vitrinaData] = await Promise.all([
         api.get<DashboardStats>('/dashboard/stats'),
         api.get<Array<{ date: string; total: number }>>('/dashboard/weekly-chart'),
         api.get<{ hourlyOrders: number[] }>('/dashboard/hourly'),
         api.get<Array<{ name: string; count: number }>>('/dashboard/top-products'),
+        api.get<VitrinaItem[]>('/products'),
       ]);
       setStats({
         ...statsData,
@@ -59,6 +70,7 @@ export default function AdminPage() {
         hourlyOrders: hourlyData.hourlyOrders,
         topProducts: topProductsData,
       });
+      setVitrina(vitrinaData.filter((p) => p.preparationMode === 'VITRINA'));
     } catch (err: unknown) {
       toast.error(err instanceof Error ? err.message : 'Error cargando dashboard');
     } finally {
@@ -133,6 +145,28 @@ export default function AdminPage() {
           bg="bg-orange-50 dark:bg-orange-900/20"
           subtitle={stats.topProducts[0] ? `${stats.topProducts[0].count} uds` : ''}
         />
+      </div>
+
+      {/* Vitrina Stock */}
+      <div className="bg-white dark:bg-gray-800 rounded-2xl p-5 shadow-sm border border-gray-100 dark:border-gray-700 mb-6">
+        <h3 className="font-bold mb-4 flex items-center gap-2">
+          <Warehouse size={18} className="text-salo-orange" />
+          Stock Vitrina
+        </h3>
+        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-4">
+          {vitrina.map((p) => (
+            <div key={p.id} className="bg-gray-50 dark:bg-gray-700/50 rounded-xl p-3 text-center">
+              <p className="text-xs text-gray-500 mb-1 truncate">{p.name}</p>
+              <p className={`text-xl font-bold ${(p.vitrinaStock?.qty ?? 0) < 5 ? 'text-red-500' : 'text-green-600'}`}>
+                {p.vitrinaStock?.qty ?? 0}
+              </p>
+              <p className="text-[10px] text-gray-400">unidades</p>
+            </div>
+          ))}
+          {vitrina.length === 0 && (
+            <p className="text-center text-gray-400 col-span-full py-4 text-sm">Sin productos en vitrina</p>
+          )}
+        </div>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">

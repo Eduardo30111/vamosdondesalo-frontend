@@ -38,7 +38,7 @@ export interface CreateProductDto {
   costPrice: number;
   type: string;
   supplierId?: string;
-  dailyStock: number;
+  preparationMode?: string;
 }
 
 export interface CreateUserDto {

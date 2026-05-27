@@ -53,13 +53,13 @@ export class CustomersController {
 
   @Post(':id/charge')
   @Roles('ADMIN', 'VENDEDOR')
-  charge(@Param('id') id: string, @Body() body: { amount: number; orderId?: string; note?: string }) {
-    return this.service.charge(id, body.amount, body.orderId, body.note);
+  charge(@Param('id') id: string, @Body() body: { amount: number }) {
+    return this.service.charge(id, body.amount);
   }
 
   @Post(':id/payment')
   @Roles('ADMIN', 'VENDEDOR')
-  payment(@Param('id') id: string, @Body() body: { amount: number; note?: string }) {
-    return this.service.payment(id, body.amount, body.note);
+  payment(@Param('id') id: string, @Body() body: { amount: number }) {
+    return this.service.payment(id, body.amount);
   }
 }

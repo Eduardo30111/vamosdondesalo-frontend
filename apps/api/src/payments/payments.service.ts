@@ -5,27 +5,21 @@ import { PrismaService } from '../prisma/prisma.service';
 export class PaymentsService {
   constructor(private prisma: PrismaService) {}
 
-  async createPayment(data: { orderId: string; method: string; amount: number; proofUrl?: string; confirmed?: boolean }) {
-    const isConfirmed = data.confirmed !== undefined ? data.confirmed : data.method === 'CASH';
-
+  async createPayment(data: { orderId: string; method: string; amount: number }) {
     const payment = await this.prisma.payment.create({
       data: {
         orderId: data.orderId,
         method: data.method as any,
         amount: data.amount,
-        proofUrl: data.proofUrl,
-        confirmed: isConfirmed,
       },
     });
 
-    if (isConfirmed) {
-      const order = await this.prisma.order.findUnique({ where: { id: data.orderId } });
-      if (order && order.type !== 'DELIVERY') {
-        await this.prisma.order.update({
-          where: { id: data.orderId },
-          data: { status: 'PAID' },
-        });
-      }
+    const order = await this.prisma.order.findUnique({ where: { id: data.orderId } });
+    if (order && order.type !== 'DELIVERY') {
+      await this.prisma.order.update({
+        where: { id: data.orderId },
+        data: { status: 'PAID' },
+      });
     }
 
     return payment;
@@ -34,7 +28,7 @@ export class PaymentsService {
   async confirmPayment(id: string) {
     const payment = await this.prisma.payment.update({
       where: { id },
-      data: { confirmed: true },
+      data: {},
     });
 
     const order = await this.prisma.order.findUnique({ where: { id: payment.orderId } });

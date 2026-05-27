@@ -16,6 +16,7 @@ import {
   UtensilsCrossed,
   Bike,
   ShoppingBag,
+  Factory,
 } from 'lucide-react';
 import Image from 'next/image';
 
@@ -26,7 +27,8 @@ interface Product {
   photoUrl: string | null;
   salePrice: number;
   type: string;
-  dailyStock: number;
+  preparationMode: string;
+  vitrinaStock: { qty: number } | null;
 }
 
 interface Table {
@@ -71,6 +73,10 @@ export default function POSPage() {
   const [existingCustomer, setExistingCustomer] = useState<{ id: string; name: string } | null>(null);
 
   const cart = useCartStore();
+  const [showProduction, setShowProduction] = useState(false);
+  const [productionProduct, setProductionProduct] = useState<Product | null>(null);
+  const [productionQty, setProductionQty] = useState('');
+  const [productionLoading, setProductionLoading] = useState(false);
 
   useEffect(() => {
     loadData();
@@ -243,6 +249,29 @@ export default function POSPage() {
     setCustomerAddress('');
   };
 
+  const handleCreateProduction = async () => {
+    if (!productionProduct || !productionQty) {
+      toast.error('Ingresa la cantidad a producir');
+      return;
+    }
+    setProductionLoading(true);
+    try {
+      await api.post('/production-orders', {
+        productId: productionProduct.id,
+        requestedQty: parseInt(productionQty),
+        userId: 'system', // backend puede ignorar o tomar del token
+      });
+      toast.success('Solicitud de producción enviada a cocina');
+      setShowProduction(false);
+      setProductionProduct(null);
+      setProductionQty('');
+    } catch (err: unknown) {
+      toast.error(err instanceof Error ? err.message : 'Error enviando producción');
+    } finally {
+      setProductionLoading(false);
+    }
+  };
+
   const filteredProducts = products.filter((p) =>
     p.name.toLowerCase().includes(search.toLowerCase())
   );
@@ -272,31 +301,63 @@ export default function POSPage() {
 
         <div className="flex-1 overflow-y-auto scrollbar-hide">
           <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
-            {filteredProducts.map((product) => (
-              <button
-                key={product.id}
-                onClick={() => cart.addItem({ productId: product.id, name: product.name, price: product.salePrice, photoUrl: product.photoUrl })}
-                className="bg-white dark:bg-gray-800 rounded-xl p-3 shadow-sm hover:shadow-md border border-gray-100 dark:border-gray-700 transition-all hover:scale-[1.02] text-left"
-              >
-                <div className="aspect-square relative rounded-lg overflow-hidden mb-2 bg-gray-100 dark:bg-gray-700">
-                  {product.photoUrl ? (
-                    <Image
-                      src={product.photoUrl}
-                      alt={product.name}
-                      fill
-                      className="object-cover"
-                      sizes="150px"
-                    />
-                  ) : (
-                    <div className="w-full h-full flex items-center justify-center">
-                      <UtensilsCrossed className="text-gray-400" size={32} />
+            {filteredProducts.map((product) => {
+              const remaining = product.vitrinaStock?.qty ?? 0;
+              const isVitrina = product.preparationMode === 'VITRINA';
+              return (
+                <div
+                  key={product.id}
+                  className="bg-white dark:bg-gray-800 rounded-xl p-3 shadow-sm hover:shadow-md border border-gray-100 dark:border-gray-700 transition-all text-left flex flex-col"
+                >
+                  <button
+                    onClick={() =>
+                      cart.addItem({ productId: product.id, name: product.name, price: product.salePrice, photoUrl: product.photoUrl })
+                    }
+                    className="flex-1 text-left"
+                  >
+                    <div className="aspect-square relative rounded-lg overflow-hidden mb-2 bg-gray-100 dark:bg-gray-700">
+                      {product.photoUrl ? (
+                        <Image
+                          src={product.photoUrl}
+                          alt={product.name}
+                          fill
+                          className="object-cover"
+                          sizes="150px"
+                        />
+                      ) : (
+                        <div className="w-full h-full flex items-center justify-center">
+                          <UtensilsCrossed className="text-gray-400" size={32} />
+                        </div>
+                      )}
+                      {isVitrina && (
+                        <div className="absolute top-1 right-1 bg-black/60 text-white text-[10px] px-1.5 py-0.5 rounded-full">
+                          Stock: {remaining}
+                        </div>
+                      )}
+                      {!isVitrina && (
+                        <div className="absolute top-1 right-1 bg-blue-600/80 text-white text-[10px] px-1.5 py-0.5 rounded-full">
+                          Preparado
+                        </div>
+                      )}
                     </div>
+                    <p className="font-medium text-xs truncate">{product.name}</p>
+                    <p className="text-salo-orange font-bold text-sm">{formatCurrency(product.salePrice)}</p>
+                  </button>
+                  {isVitrina && (
+                    <button
+                      onClick={() => {
+                        setProductionProduct(product);
+                        setShowProduction(true);
+                      }}
+                      className="mt-2 w-full py-1.5 rounded-lg bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 text-[10px] font-medium flex items-center justify-center gap-1 hover:bg-gray-200 dark:hover:bg-gray-600 transition"
+                    >
+                      <Factory size={12} />
+                      Solicitar más
+                    </button>
                   )}
                 </div>
-                <p className="font-medium text-xs truncate">{product.name}</p>
-                <p className="text-salo-orange font-bold text-sm">{formatCurrency(product.salePrice)}</p>
-              </button>
-            ))}
+              );
+            })}
           </div>
         </div>
       </div>
@@ -601,6 +662,42 @@ export default function POSPage() {
                 className="w-full py-3 rounded-xl bg-purple-600 text-white font-semibold hover:bg-purple-700 transition disabled:opacity-50"
               >
                 Confirmar Fiado
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      {/* Production Request Modal */}
+      {showProduction && productionProduct && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+          <div className="bg-white dark:bg-gray-800 rounded-2xl w-full max-w-sm p-6 shadow-2xl">
+            <div className="flex justify-between items-center mb-4">
+              <h3 className="text-lg font-bold">Solicitar Producción</h3>
+              <button onClick={() => setShowProduction(false)} className="p-1">
+                <X size={20} />
+              </button>
+            </div>
+            <p className="text-sm text-gray-500 mb-4">{productionProduct.name}</p>
+            <input
+              type="number"
+              placeholder="Cantidad a producir"
+              value={productionQty}
+              onChange={(e) => setProductionQty(e.target.value)}
+              className="w-full px-3 py-2 rounded-lg border border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 text-sm mb-4"
+            />
+            <div className="flex gap-2">
+              <button
+                onClick={() => setShowProduction(false)}
+                className="flex-1 py-2.5 rounded-xl border border-gray-200 dark:border-gray-600 text-sm font-medium"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={handleCreateProduction}
+                disabled={productionLoading || !productionQty}
+                className="flex-1 py-2.5 rounded-xl bg-salo-orange text-white text-sm font-medium hover:bg-primary-700 transition disabled:opacity-50"
+              >
+                {productionLoading ? 'Enviando...' : 'Enviar a Cocina'}
               </button>
             </div>
           </div>

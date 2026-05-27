@@ -1,29 +1,30 @@
 import { Controller, Get, Post, Put, Body, Param, UseGuards } from '@nestjs/common';
-import { KitchenProductionService } from './kitchen-production.service';
+import { ProductionOrdersService } from './production-orders.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
 
-@Controller('kitchen-production')
+@Controller('production-orders')
 @UseGuards(JwtAuthGuard, RolesGuard)
-export class KitchenProductionController {
-  constructor(private readonly service: KitchenProductionService) {}
+export class ProductionOrdersController {
+  constructor(private readonly service: ProductionOrdersService) {}
 
-  @Get('active')
+  @Get()
   @Roles('ADMIN', 'VENDEDOR', 'COCINA')
-  findActive() {
-    return this.service.findActive();
+  findAll() {
+    return this.service.findAll();
   }
 
-  @Get('vitrina')
-  findVitrina() {
-    return this.service.getVitrina();
+  @Get('pending')
+  @Roles('ADMIN', 'VENDEDOR', 'COCINA')
+  findPending() {
+    return this.service.findPending();
   }
 
   @Post()
-  @Roles('ADMIN', 'COCINA')
-  create(@Body() body: { productId: string; startedQty: number }) {
-    return this.service.create(body.productId, body.startedQty);
+  @Roles('ADMIN', 'VENDEDOR')
+  create(@Body() body: { productId: string; requestedQty: number; userId: string }) {
+    return this.service.create(body.productId, body.requestedQty, body.userId);
   }
 
   @Put(':id/add-ready')

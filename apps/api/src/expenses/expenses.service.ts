@@ -10,7 +10,6 @@ export class ExpensesService {
     if (type) where.type = type;
     return this.prisma.expense.findMany({
       where,
-      include: { user: { select: { id: true, name: true } } },
       orderBy: { date: 'desc' },
     });
   }
@@ -20,26 +19,23 @@ export class ExpensesService {
     if (type) where.type = type;
     return this.prisma.expense.findMany({
       where,
-      include: { user: { select: { id: true, name: true } } },
       orderBy: { date: 'desc' },
     });
   }
 
-  create(data: { category: string; description: string; amount: number; type: string; date?: string; userId: string }) {
+  create(data: { category: string; amount: number; type: string; date?: string; userId: string }) {
     return this.prisma.expense.create({
       data: {
         category: data.category,
-        description: data.description,
         amount: data.amount,
         type: data.type as any,
         date: data.date ? new Date(data.date) : new Date(),
         userId: data.userId,
       },
-      include: { user: { select: { id: true, name: true } } },
     });
   }
 
-  update(id: string, data: { category?: string; description?: string; amount?: number; type?: string; date?: string }) {
+  update(id: string, data: { category?: string; amount?: number; type?: string; date?: string }) {
     const updateData: any = { ...data };
     if (data.date) updateData.date = new Date(data.date);
     if (data.type) updateData.type = data.type;

@@ -133,7 +133,7 @@ export class AccountingService {
     };
   }
 
-  async closeCash(data: { date: string; actualCash: number; note?: string; userId: string }) {
+  async closeCash(data: { date: string; actualCash: number }) {
     const report = await this.getDailyReport(new Date(data.date));
     const difference = data.actualCash - report.expectedCash;
 
@@ -143,15 +143,12 @@ export class AccountingService {
         expectedCash: report.expectedCash,
         actualCash: data.actualCash,
         difference,
-        note: data.note,
-        userId: data.userId,
       },
     });
   }
 
   async getCashCloses(limit = 30) {
     return this.prisma.cashClose.findMany({
-      include: { user: { select: { id: true, name: true } } },
       orderBy: { date: 'desc' },
       take: limit,
     });

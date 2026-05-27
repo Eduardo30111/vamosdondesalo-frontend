@@ -28,7 +28,7 @@ export class DashboardService {
     ] = await Promise.all([
       this.prisma.order.count({ where: { createdAt: { gte: start } } }),
       this.prisma.order.aggregate({ where: { createdAt: { gte: start }, status: 'PAID' }, _sum: { total: true } }),
-      this.prisma.order.count({ where: { status: { in: ['PENDING', 'PREPARING', 'READY', 'IN_TRANSIT'] } } }),
+      this.prisma.order.count({ where: { status: { in: ['PENDING', 'PREPARING', 'READY', 'DELIVERED'] } } }),
       this.prisma.order.count({ where: { type: 'DELIVERY', status: { not: 'DELIVERED' } } }),
       this.prisma.order.count({ where: { status: 'PENDING' } }),
       this.prisma.orderItem.groupBy({

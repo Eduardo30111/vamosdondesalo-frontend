@@ -44,4 +44,14 @@ export class RealtimeGateway implements OnGatewayConnection, OnGatewayDisconnect
       this.server.to(`order:${order.id}`).emit('order:status_changed', order);
     }
   }
+
+  emitVitrinaUpdated(data: any) {
+    this.server.to('pos').emit('vitrina:updated', data);
+    this.server.to('kitchen').emit('vitrina:updated', data);
+  }
+
+  emitProductionUpdated(data: any) {
+    this.server.to('kitchen').emit('production:updated', data);
+    this.server.to('pos').emit('production:updated', data);
+  }
 }

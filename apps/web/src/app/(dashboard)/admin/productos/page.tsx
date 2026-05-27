@@ -26,10 +26,12 @@ interface FormData {
   salePrice: number;
   costPrice: number;
   type: string;
+  preparationMode: string;
   dailyStock: number;
+  supplierId?: string;
 }
 
-const emptyForm: FormData = { name: '', description: '', photoUrl: '', salePrice: 0, costPrice: 0, type: 'OWN', dailyStock: 50 };
+const emptyForm: FormData = { name: '', description: '', photoUrl: '', salePrice: 0, costPrice: 0, type: 'OWN', preparationMode: 'VITRINA', dailyStock: 50 };
 
 export default function ProductosPage() {
   const [products, setProducts] = useState<Product[]>([]);
@@ -71,7 +73,7 @@ export default function ProductosPage() {
   };
 
   const handleEdit = (p: Product) => {
-    setForm({ name: p.name, description: p.description || '', photoUrl: p.photoUrl || '', salePrice: p.salePrice, costPrice: p.costPrice, type: p.type, dailyStock: p.dailyStock });
+    setForm({ name: p.name, description: p.description || '', photoUrl: p.photoUrl || '', salePrice: p.salePrice, costPrice: p.costPrice, type: p.type, preparationMode: (p as any).preparationMode || 'VITRINA', dailyStock: p.dailyStock });
     setEditId(p.id);
     setShowForm(true);
   };
@@ -140,6 +142,13 @@ export default function ProductosPage() {
               <div className="grid grid-cols-2 gap-3">
                 <div><label className="text-xs text-gray-500">Tipo</label><select value={form.type} onChange={(e) => setForm({ ...form, type: e.target.value })} className="w-full px-3 py-2 rounded-lg border border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 text-sm"><option value="OWN">Propio</option><option value="SUPPLIER">Proveedor</option></select></div>
                 <div><label className="text-xs text-gray-500">Stock diario</label><input type="number" value={form.dailyStock} onChange={(e) => setForm({ ...form, dailyStock: +e.target.value })} className="w-full px-3 py-2 rounded-lg border border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 text-sm" min="0" required /></div>
+              </div>
+              <div>
+                <label className="text-xs text-gray-500">Modo de preparación</label>
+                <select value={form.preparationMode} onChange={(e) => setForm({ ...form, preparationMode: e.target.value })} className="w-full px-3 py-2 rounded-lg border border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 text-sm">
+                  <option value="VITRINA">Vitrina (ya preparado)</option>
+                  <option value="PREPARADO">Preparado (cocinar al momento)</option>
+                </select>
               </div>
               <button type="submit" className="w-full py-3 rounded-xl bg-salo-orange text-white font-semibold hover:bg-primary-700 transition">{editId ? 'Actualizar' : 'Crear'} Producto</button>
             </form>

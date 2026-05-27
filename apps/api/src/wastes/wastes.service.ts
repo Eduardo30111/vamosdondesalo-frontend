@@ -14,27 +14,26 @@ export class WastesService {
     }
     return this.prisma.waste.findMany({
       where,
-      include: { product: true, user: { select: { id: true, name: true } } },
+      include: { product: true },
       orderBy: { createdAt: 'desc' },
     });
   }
 
-  async create(data: { productId: string; qty: number; reason: string; note?: string; userId: string }) {
+  async create(data: { productId: string; qty: number; reason: string; userId: string }) {
     const waste = await this.prisma.waste.create({
       data: {
         productId: data.productId,
         qty: data.qty,
         reason: data.reason as any,
-        note: data.note,
         userId: data.userId,
       },
-      include: { product: true, user: { select: { id: true, name: true } } },
+      include: { product: true },
     });
 
-    // Reduce daily stock
-    await this.prisma.product.update({
-      where: { id: data.productId },
-      data: { dailyStock: { decrement: data.qty } },
+    // Reduce vitrina stock if applicable
+    await this.prisma.vitrinaStock.updateMany({
+      where: { productId: data.productId },
+      data: { qty: { decrement: data.qty } },
     });
 
     return waste;

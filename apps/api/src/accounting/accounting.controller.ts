@@ -25,8 +25,8 @@ export class AccountingController {
   }
 
   @Post('cash-close')
-  closeCash(@Body() body: { date: string; actualCash: number; note?: string }, @Request() req: any) {
-    return this.service.closeCash({ ...body, userId: req.user.id });
+  closeCash(@Body() body: { date: string; actualCash: number }) {
+    return this.service.closeCash(body);
   }
 
   @Get('cash-closes')
