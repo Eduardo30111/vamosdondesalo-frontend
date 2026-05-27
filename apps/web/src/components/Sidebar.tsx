@@ -24,11 +24,13 @@ import {
   Calculator,
   Settings,
   Store,
+  DollarSign,
 } from 'lucide-react';
 import { useState, useEffect } from 'react';
 
 const adminLinks = [
   { href: '/admin', label: 'Dashboard', icon: LayoutDashboard },
+  { href: '/vitrina', label: 'Vitrina', icon: DollarSign },
   { href: '/pos', label: 'POS', icon: ShoppingCart },
   { href: '/cocina', label: 'Cocina', icon: ChefHat },
   { href: '/admin/domicilios', label: 'Domicilios', icon: Bike },
@@ -46,11 +48,12 @@ const adminLinks = [
 
 const vendedorLinks = [
   { href: '/pos', label: 'POS', icon: ShoppingCart },
+  { href: '/vitrina', label: 'Vitrina', icon: DollarSign },
   { href: '/cocina', label: 'Cocina', icon: ChefHat },
 ];
 
 const cocinaLinks = [
-  { href: '/cocina', label: 'Cocina', icon: ChefHat },
+  { href: '/cocina', label: 'Producción', icon: ChefHat },
 ];
 
 export function Sidebar() {
