@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react';
 import { toast } from 'sonner';
 import { api } from '@/lib/api';
 import { formatCurrency } from '@/lib/utils';
-import { CreditCard, AlertTriangle, Search, X, Plus } from 'lucide-react';
+import { CreditCard, AlertTriangle, Search, X, Plus, Edit2, Trash2 } from 'lucide-react';
 
 interface Credit {
   id: string;
@@ -34,7 +34,7 @@ export default function FiadosPage() {
   const [paymentNote, setPaymentNote] = useState('');
   const [search, setSearch] = useState('');
 
-  // New states for Add Charge feature
+  // States for Add Charge feature
   const [showAddCharge, setShowAddCharge] = useState(false);
   const [products, setProducts] = useState<any[]>([]);
   const [isNewCustomer, setIsNewCustomer] = useState(false);
@@ -47,6 +47,13 @@ export default function FiadosPage() {
   const [productPrice, setProductPrice] = useState('');
   const [productQty, setProductQty] = useState(1);
   const [chargeDate, setChargeDate] = useState(() => new Date().toISOString().split('T')[0]);
+
+  // States for Edit / Delete features
+  const [isSaving, setIsSaving] = useState(false);
+  const [editingCredit, setEditingCredit] = useState<Credit | null>(null);
+  const [editAmount, setEditAmount] = useState('');
+  const [editNote, setEditNote] = useState('');
+  const [editDate, setEditDate] = useState('');
 
   useEffect(() => {
     loadCustomers();
@@ -84,6 +91,7 @@ export default function FiadosPage() {
 
   const handlePayment = async () => {
     if (!selectedCustomer || !paymentAmount) return;
+    setIsSaving(true);
     try {
       await api.post(`/customers/${selectedCustomer.id}/payment`, {
         amount: parseFloat(paymentAmount),
@@ -97,11 +105,14 @@ export default function FiadosPage() {
       loadCustomerDetail(selectedCustomer.id);
     } catch (err: unknown) {
       toast.error(err instanceof Error ? err.message : 'Error registrando abono');
+    } finally {
+      setIsSaving(false);
     }
   };
 
   const handleCreateCharge = async () => {
     let customerId = customerIdForCharge;
+    setIsSaving(true);
     try {
       if (isNewCustomer) {
         const c = await api.post<any>('/customers', {
@@ -112,7 +123,10 @@ export default function FiadosPage() {
         customerId = c.id;
       }
 
-      if (!customerId) return;
+      if (!customerId) {
+        setIsSaving(false);
+        return;
+      }
 
       const price = parseFloat(productPrice);
       const totalAmount = price * productQty;
@@ -130,6 +144,41 @@ export default function FiadosPage() {
       loadCustomerDetail(customerId);
     } catch (err: unknown) {
       toast.error(err instanceof Error ? err.message : 'Error registrando fiado');
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const handleDeleteCredit = async (creditId: string) => {
+    if (!selectedCustomer) return;
+    if (!confirm('¿Estás seguro de que deseas eliminar este registro de fiado/abono? Esto recalculará la deuda del cliente.')) return;
+    try {
+      await api.delete(`/customers/credits/${creditId}`);
+      toast.success('Registro eliminado correctamente');
+      loadCustomers();
+      loadCustomerDetail(selectedCustomer.id);
+    } catch (err: unknown) {
+      toast.error(err instanceof Error ? err.message : 'Error al eliminar registro');
+    }
+  };
+
+  const handleUpdateCredit = async () => {
+    if (!selectedCustomer || !editingCredit) return;
+    setIsSaving(true);
+    try {
+      await api.put(`/customers/credits/${editingCredit.id}`, {
+        amount: parseFloat(editAmount),
+        note: editNote,
+        createdAt: editDate,
+      });
+      toast.success('Registro actualizado correctamente');
+      setEditingCredit(null);
+      loadCustomers();
+      loadCustomerDetail(selectedCustomer.id);
+    } catch (err: unknown) {
+      toast.error(err instanceof Error ? err.message : 'Error al actualizar registro');
+    } finally {
+      setIsSaving(false);
     }
   };
 
@@ -268,9 +317,28 @@ export default function FiadosPage() {
                     <span className={`font-medium ${credit.type === 'CHARGE' ? 'text-red-600' : 'text-green-600'}`}>
                       {credit.type === 'CHARGE' ? '+' : '-'}{formatCurrency(credit.amount)}
                     </span>
-                    <span className="text-xs text-gray-400">
-                      {new Date(credit.createdAt).toLocaleDateString('es-CO')}
-                    </span>
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs text-gray-400">
+                        {new Date(credit.createdAt).toLocaleDateString('es-CO')}
+                      </span>
+                      <button
+                        onClick={() => {
+                          setEditingCredit(credit);
+                          setEditAmount(credit.amount.toString());
+                          setEditNote(credit.note || '');
+                          setEditDate(new Date(credit.createdAt).toISOString().split('T')[0]);
+                        }}
+                        className="text-gray-400 hover:text-blue-600 dark:hover:text-blue-400 transition"
+                      >
+                        <Edit2 size={13} />
+                      </button>
+                      <button
+                        onClick={() => handleDeleteCredit(credit.id)}
+                        className="text-gray-400 hover:text-red-600 dark:hover:text-red-400 transition"
+                      >
+                        <Trash2 size={13} />
+                      </button>
+                    </div>
                   </div>
                   {credit.note && <p className="text-xs text-gray-500 mt-1">{credit.note}</p>}
                 </div>
@@ -292,29 +360,32 @@ export default function FiadosPage() {
               type="number"
               placeholder="Monto del abono"
               value={paymentAmount}
+              disabled={isSaving}
               onChange={(e) => setPaymentAmount(e.target.value)}
-              className="w-full px-4 py-2.5 rounded-xl border border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 mb-3"
+              className="w-full px-4 py-2.5 rounded-xl border border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 mb-3 disabled:opacity-50"
             />
             <input
               type="text"
               placeholder="Nota (opcional)"
               value={paymentNote}
+              disabled={isSaving}
               onChange={(e) => setPaymentNote(e.target.value)}
-              className="w-full px-4 py-2.5 rounded-xl border border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 mb-4"
+              className="w-full px-4 py-2.5 rounded-xl border border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 mb-4 disabled:opacity-50"
             />
             <div className="flex gap-2">
               <button
                 onClick={() => setShowPayment(false)}
-                className="flex-1 py-2.5 border border-gray-200 dark:border-gray-600 rounded-xl font-medium text-sm"
+                disabled={isSaving}
+                className="flex-1 py-2.5 border border-gray-200 dark:border-gray-600 rounded-xl font-medium text-sm disabled:opacity-50"
               >
                 Cancelar
               </button>
               <button
                 onClick={handlePayment}
-                disabled={!paymentAmount || parseFloat(paymentAmount) <= 0}
+                disabled={isSaving || !paymentAmount || parseFloat(paymentAmount) <= 0}
                 className="flex-1 py-2.5 bg-green-600 text-white rounded-xl font-medium text-sm hover:bg-green-700 disabled:opacity-50"
               >
-                Confirmar
+                {isSaving ? 'Registrando...' : 'Confirmar'}
               </button>
             </div>
           </div>
@@ -336,6 +407,7 @@ export default function FiadosPage() {
                     <input
                       type="radio"
                       checked={!isNewCustomer}
+                      disabled={isSaving}
                       onChange={() => setIsNewCustomer(false)}
                       className="text-salo-orange focus:ring-salo-orange"
                     />
@@ -345,6 +417,7 @@ export default function FiadosPage() {
                     <input
                       type="radio"
                       checked={isNewCustomer}
+                      disabled={isSaving}
                       onChange={() => setIsNewCustomer(true)}
                       className="text-salo-orange focus:ring-salo-orange"
                     />
@@ -355,8 +428,9 @@ export default function FiadosPage() {
                 {!isNewCustomer ? (
                   <select
                     value={customerIdForCharge}
+                    disabled={isSaving}
                     onChange={(e) => setCustomerIdForCharge(e.target.value)}
-                    className="w-full px-3 py-2 rounded-xl border border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 text-sm outline-none focus:ring-2 focus:ring-salo-orange"
+                    className="w-full px-3 py-2 rounded-xl border border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 text-sm outline-none focus:ring-2 focus:ring-salo-orange disabled:opacity-50"
                   >
                     <option value="">Selecciona un cliente...</option>
                     {customers.map((c) => (
@@ -371,22 +445,25 @@ export default function FiadosPage() {
                       type="text"
                       placeholder="Nombre del cliente"
                       value={newCustomerName}
+                      disabled={isSaving}
                       onChange={(e) => setNewCustomerName(e.target.value)}
-                      className="w-full px-3 py-2 rounded-xl border border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 text-sm"
+                      className="w-full px-3 py-2 rounded-xl border border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 text-sm disabled:opacity-50"
                     />
                     <input
                       type="text"
                       placeholder="Cédula"
                       value={newCustomerCedula}
+                      disabled={isSaving}
                       onChange={(e) => setNewCustomerCedula(e.target.value)}
-                      className="w-full px-3 py-2 rounded-xl border border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 text-sm"
+                      className="w-full px-3 py-2 rounded-xl border border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 text-sm disabled:opacity-50"
                     />
                     <input
                       type="tel"
                       placeholder="Teléfono (opcional)"
                       value={newCustomerPhone}
+                      disabled={isSaving}
                       onChange={(e) => setNewCustomerPhone(e.target.value)}
-                      className="w-full px-3 py-2 rounded-xl border border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 text-sm"
+                      className="w-full px-3 py-2 rounded-xl border border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 text-sm disabled:opacity-50"
                     />
                   </div>
                 )}
@@ -397,6 +474,7 @@ export default function FiadosPage() {
                 <label className="block text-xs font-semibold text-gray-500 mb-1">Producto</label>
                 <select
                   value={selectedProductId}
+                  disabled={isSaving}
                   onChange={(e) => {
                     const id = e.target.value;
                     setSelectedProductId(id);
@@ -411,7 +489,7 @@ export default function FiadosPage() {
                       }
                     }
                   }}
-                  className="w-full px-3 py-2 rounded-xl border border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 text-sm outline-none focus:ring-2 focus:ring-salo-orange mb-2"
+                  className="w-full px-3 py-2 rounded-xl border border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 text-sm outline-none focus:ring-2 focus:ring-salo-orange mb-2 disabled:opacity-50"
                 >
                   <option value="">Selecciona un producto...</option>
                   {products.map((p) => (
@@ -427,8 +505,9 @@ export default function FiadosPage() {
                     type="text"
                     placeholder="Descripción del producto"
                     value={customProductNote}
+                    disabled={isSaving}
                     onChange={(e) => setCustomProductNote(e.target.value)}
-                    className="w-full px-3 py-2 rounded-xl border border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 text-sm mb-2"
+                    className="w-full px-3 py-2 rounded-xl border border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 text-sm mb-2 disabled:opacity-50"
                   />
                 )}
 
@@ -440,7 +519,7 @@ export default function FiadosPage() {
                       placeholder="Valor"
                       value={productPrice}
                       onChange={(e) => setProductPrice(e.target.value)}
-                      disabled={selectedProductId !== 'custom' && !!selectedProductId}
+                      disabled={isSaving || (selectedProductId !== 'custom' && !!selectedProductId)}
                       className="w-full px-3 py-2 rounded-xl border border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 text-sm disabled:opacity-75"
                     />
                   </div>
@@ -450,8 +529,9 @@ export default function FiadosPage() {
                       type="number"
                       min="1"
                       value={productQty}
+                      disabled={isSaving}
                       onChange={(e) => setProductQty(Math.max(1, parseInt(e.target.value) || 1))}
-                      className="w-full px-3 py-2 rounded-xl border border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 text-sm"
+                      className="w-full px-3 py-2 rounded-xl border border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 text-sm disabled:opacity-50"
                     />
                   </div>
                 </div>
@@ -463,8 +543,9 @@ export default function FiadosPage() {
                 <input
                   type="date"
                   value={chargeDate}
+                  disabled={isSaving}
                   onChange={(e) => setChargeDate(e.target.value)}
-                  className="w-full px-3 py-2 rounded-xl border border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 text-sm"
+                  className="w-full px-3 py-2 rounded-xl border border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 text-sm disabled:opacity-50"
                 />
               </div>
             </div>
@@ -472,13 +553,15 @@ export default function FiadosPage() {
             <div className="mt-6 flex gap-2">
               <button
                 onClick={() => setShowAddCharge(false)}
-                className="flex-1 py-2.5 border border-gray-200 dark:border-gray-600 rounded-xl font-medium text-sm"
+                disabled={isSaving}
+                className="flex-1 py-2.5 border border-gray-200 dark:border-gray-600 rounded-xl font-medium text-sm disabled:opacity-50"
               >
                 Cancelar
               </button>
               <button
                 onClick={handleCreateCharge}
                 disabled={
+                  isSaving ||
                   (!isNewCustomer && !customerIdForCharge) ||
                   (isNewCustomer && (!newCustomerName || !newCustomerCedula)) ||
                   !customProductNote ||
@@ -487,7 +570,66 @@ export default function FiadosPage() {
                 }
                 className="flex-1 py-2.5 bg-salo-orange text-white rounded-xl font-medium text-sm hover:opacity-90 disabled:opacity-50"
               >
-                Registrar Deuda
+                {isSaving ? 'Registrando...' : 'Registrar Deuda'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Edit Credit Modal */}
+      {editingCredit && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+          <div className="bg-white dark:bg-gray-800 rounded-2xl w-full max-w-sm p-6 shadow-2xl">
+            <h3 className="text-lg font-bold mb-4">
+              Editar {editingCredit.type === 'CHARGE' ? 'Fiado' : 'Abono'}
+            </h3>
+            <div className="space-y-4 mb-4">
+              <div>
+                <label className="block text-xs font-semibold text-gray-500 mb-1">Monto</label>
+                <input
+                  type="number"
+                  value={editAmount}
+                  disabled={isSaving}
+                  onChange={(e) => setEditAmount(e.target.value)}
+                  className="w-full px-4 py-2.5 rounded-xl border border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 disabled:opacity-50"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-semibold text-gray-500 mb-1">Nota</label>
+                <input
+                  type="text"
+                  value={editNote}
+                  disabled={isSaving}
+                  onChange={(e) => setEditNote(e.target.value)}
+                  className="w-full px-4 py-2.5 rounded-xl border border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 disabled:opacity-50"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-semibold text-gray-500 mb-1">Fecha</label>
+                <input
+                  type="date"
+                  value={editDate}
+                  disabled={isSaving}
+                  onChange={(e) => setEditDate(e.target.value)}
+                  className="w-full px-4 py-2.5 rounded-xl border border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 disabled:opacity-50"
+                />
+              </div>
+            </div>
+            <div className="flex gap-2">
+              <button
+                onClick={() => setEditingCredit(null)}
+                disabled={isSaving}
+                className="flex-1 py-2.5 border border-gray-200 dark:border-gray-600 rounded-xl font-medium text-sm disabled:opacity-50"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={handleUpdateCredit}
+                disabled={isSaving || !editAmount || parseFloat(editAmount) <= 0}
+                className="flex-1 py-2.5 bg-salo-orange text-white rounded-xl font-medium text-sm hover:opacity-90 disabled:opacity-50"
+              >
+                {isSaving ? 'Guardando...' : 'Guardar'}
               </button>
             </div>
           </div>

@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Body, Param, UseGuards } from '@nestjs/common';
+import { Controller, Get, Post, Put, Delete, Body, Param, UseGuards } from '@nestjs/common';
 import { CustomersService } from './customers.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
@@ -68,5 +68,27 @@ export class CustomersController {
   @Roles('ADMIN', 'VENDEDOR')
   payment(@Param('id') id: string, @Body() body: { amount: number; note?: string }) {
     return this.service.payment(id, body.amount, body.note);
+  }
+
+  @Delete('credits/:creditId')
+  @Roles('ADMIN')
+  deleteCredit(@Param('creditId') creditId: string) {
+    return this.service.deleteCredit(creditId);
+  }
+
+  @Put('credits/:creditId')
+  @Roles('ADMIN')
+  updateCredit(
+    @Param('creditId') creditId: string,
+    @Body() body: { amount: number; note?: string; createdAt?: string }
+  ) {
+    let date: Date | undefined = undefined;
+    if (body.createdAt) {
+      const parsedDate = new Date(body.createdAt);
+      if (!isNaN(parsedDate.getTime())) {
+        date = parsedDate;
+      }
+    }
+    return this.service.updateCredit(creditId, body.amount, body.note, date);
   }
 }

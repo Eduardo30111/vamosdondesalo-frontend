@@ -102,4 +102,45 @@ export class CustomersService {
     ]);
     return credit;
   }
+
+  async deleteCredit(creditId: string) {
+    const credit = await this.prisma.credit.findUniqueOrThrow({ where: { id: creditId } });
+    await this.prisma.$transaction([
+      this.prisma.credit.delete({ where: { id: creditId } }),
+      this.prisma.customer.update({
+        where: { id: credit.customerId },
+        data: {
+          totalDebt: credit.type === 'CHARGE'
+            ? { decrement: credit.amount }
+            : { increment: credit.amount }
+        }
+      })
+    ]);
+    return { success: true };
+  }
+
+  async updateCredit(creditId: string, amount: number, note?: string, createdAt?: Date) {
+    const oldCredit = await this.prisma.credit.findUniqueOrThrow({ where: { id: creditId } });
+    const diff = amount - oldCredit.amount;
+    
+    await this.prisma.$transaction([
+      this.prisma.credit.update({
+        where: { id: creditId },
+        data: {
+          amount,
+          note,
+          createdAt: createdAt ? new Date(createdAt) : undefined,
+        }
+      }),
+      this.prisma.customer.update({
+        where: { id: oldCredit.customerId },
+        data: {
+          totalDebt: oldCredit.type === 'CHARGE'
+            ? { increment: diff }
+            : { decrement: diff }
+        }
+      })
+    ]);
+    return { success: true };
+  }
 }
