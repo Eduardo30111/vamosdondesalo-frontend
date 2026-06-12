@@ -551,7 +551,7 @@ export default function POSPage() {
         </div>
 
         <div className="flex-1 overflow-y-auto scrollbar-hide">
-          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
+          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3">
             {filteredProducts.map((product) => {
               const remaining = product.vitrinaStock?.qty ?? 0;
               const isVitrina = product.preparationMode === 'VITRINA';
@@ -621,15 +621,15 @@ export default function POSPage() {
 
       {/* Cart Panel wrapper for mobile drawer */}
       <div className={cn(
-        "fixed inset-0 z-40 bg-black/60 backdrop-blur-sm lg:backdrop-blur-none lg:bg-transparent lg:relative lg:inset-auto lg:z-auto transition-all duration-300",
-        showMobileCart ? "opacity-100 pointer-events-auto" : "opacity-0 pointer-events-none lg:opacity-100 lg:pointer-events-auto lg:flex"
+        "fixed inset-0 z-40 bg-black/60 backdrop-blur-sm transition-all duration-300",
+        showMobileCart ? "opacity-100 pointer-events-auto" : "opacity-0 pointer-events-none"
       )}
       onClick={() => setShowMobileCart(false)}
       >
         <div 
           className={cn(
-            "fixed bottom-0 left-0 right-0 top-12 lg:top-auto bg-white dark:bg-gray-800 rounded-t-3xl lg:rounded-2xl shadow-2xl lg:shadow-lg border-t lg:border border-gray-100 dark:border-gray-700 flex flex-col max-h-[90vh] lg:max-h-[calc(100vh-3.5rem)] lg:w-96 transition-transform duration-300 transform lg:transform-none w-full",
-            showMobileCart ? "translate-y-0" : "translate-y-full lg:translate-y-0"
+            "fixed bottom-0 left-0 right-0 top-12 lg:top-auto lg:bottom-4 lg:right-4 lg:left-auto bg-white dark:bg-gray-800 rounded-t-3xl lg:rounded-2xl shadow-2xl lg:shadow-lg border-t lg:border border-gray-100 dark:border-gray-700 flex flex-col max-h-[90vh] lg:max-h-[calc(100vh-6rem)] w-full lg:w-96 transition-transform duration-300 transform",
+            showMobileCart ? "translate-y-0" : "translate-y-full"
           )}
           onClick={(e) => e.stopPropagation()}
         >
@@ -645,7 +645,7 @@ export default function POSPage() {
                     Limpiar
                   </button>
                 )}
-                <button onClick={() => setShowMobileCart(false)} className="lg:hidden p-1 text-gray-400 hover:text-gray-650 dark:hover:text-gray-200 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition">
+                <button onClick={() => setShowMobileCart(false)} className="p-1 text-gray-400 hover:text-gray-650 dark:hover:text-gray-200 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition">
                   <X size={20} />
                 </button>
               </div>
@@ -989,11 +989,11 @@ export default function POSPage() {
         </div>
       )}
 
-      {/* Floating Mobile Cart Bar */}
+      {/* Floating Cart Bar */}
       {cart.items.length > 0 && (
         <button
           onClick={() => setShowMobileCart(true)}
-          className="lg:hidden fixed bottom-4 left-4 right-4 z-30 bg-salo-orange hover:bg-orange-600 text-white rounded-2xl shadow-lg px-6 py-4 flex items-center justify-between animate-in slide-in-from-bottom duration-300"
+          className="fixed bottom-4 left-4 right-4 lg:left-auto lg:right-6 lg:w-96 z-30 bg-salo-orange hover:bg-orange-600 text-white rounded-2xl shadow-lg px-6 py-4 flex items-center justify-between animate-in slide-in-from-bottom duration-300"
         >
           <div className="flex items-center gap-3">
             <div className="bg-white/20 w-8 h-8 rounded-lg flex items-center justify-center font-bold text-sm">
