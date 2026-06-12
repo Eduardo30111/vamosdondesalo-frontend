@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Put, Delete, Body, Param, UseGuards } from '@nestjs/common';
+import { Controller, Get, Post, Put, Delete, Body, Param, UseGuards, Request } from '@nestjs/common';
 import { ProductsService } from './products.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
@@ -24,15 +24,17 @@ export class ProductsController {
   }
 
   @Post()
-  @Roles('ADMIN')
-  create(@Body() dto: CreateProductDto) {
-    return this.productsService.create(dto);
+  @Roles('ADMIN', 'MERCHANT')
+  create(@Request() req: any, @Body() dto: CreateProductDto) {
+    const storeId = req.user.role === 'ADMIN' ? (dto as any).storeId : req.user.storeId;
+    return this.productsService.create(dto, storeId);
   }
 
   @Put(':id')
-  @Roles('ADMIN')
-  update(@Param('id') id: string, @Body() dto: UpdateProductDto) {
-    return this.productsService.update(id, dto);
+  @Roles('ADMIN', 'MERCHANT')
+  update(@Request() req: any, @Param('id') id: string, @Body() dto: UpdateProductDto) {
+    const storeId = req.user.role === 'ADMIN' ? (dto as any).storeId : req.user.storeId;
+    return this.productsService.update(id, dto, req.user.id, req.user.role === 'ADMIN', storeId);
   }
 
   @Put(':id/receive-supplier')

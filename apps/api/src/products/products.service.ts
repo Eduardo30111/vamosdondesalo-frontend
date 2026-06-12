@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, BadRequestException, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateProductDto } from './dto/create-product.dto';
 import { UpdateProductDto } from './dto/update-product.dto';
@@ -13,8 +13,22 @@ export class ProductsService {
 
   async findAll() {
     return this.prisma.product.findMany({
-      where: { active: true },
-      include: { vitrinaStock: true },
+      where: {
+        active: true,
+        OR: [
+          { store: null },
+          {
+            store: {
+              active: true,
+              OR: [
+                { planExpiresAt: { gt: new Date() } },
+                { balance: { gte: 5000 } }
+              ]
+            }
+          }
+        ]
+      },
+      include: { vitrinaStock: true, store: true },
       orderBy: { name: 'asc' },
     });
   }
@@ -26,7 +40,25 @@ export class ProductsService {
     });
   }
 
-  async create(dto: CreateProductDto) {
+  async create(dto: CreateProductDto, storeId?: string) {
+    if (storeId) {
+      const store = await this.prisma.store.findUnique({ where: { id: storeId } });
+      if (!store) throw new NotFoundException('Tienda no encontrada');
+
+      if (store.plan === 'FREE') {
+        const activeCount = await this.prisma.product.count({
+          where: { storeId, active: true }
+        });
+        if (activeCount >= 10) {
+          throw new BadRequestException('El plan gratuito está limitado a un máximo de 10 productos activos');
+        }
+      }
+
+      if (new Date() > store.planExpiresAt && store.balance < 5000) {
+        throw new BadRequestException('Saldo insuficiente para activar productos. Debes realizar una recarga.');
+      }
+    }
+
     const product = await this.prisma.product.create({
       data: {
         name: dto.name,
@@ -38,6 +70,7 @@ export class ProductsService {
         preparationMode: (dto.preparationMode as any) ?? 'VITRINA',
         dailyStock: dto.dailyStock ?? 0,
         supplier: dto.supplierId ? { connect: { id: dto.supplierId } } : undefined,
+        store: storeId ? { connect: { id: storeId } } : undefined,
       },
     });
 
@@ -76,8 +109,28 @@ export class ProductsService {
     return result;
   }
 
-  async update(id: string, dto: UpdateProductDto) {
+  async update(id: string, dto: UpdateProductDto, userId?: string, isAdmin?: boolean, storeId?: string) {
     const current = await this.prisma.product.findUniqueOrThrow({ where: { id }, include: { vitrinaStock: true } });
+    if (!isAdmin && current.storeId && current.storeId !== storeId) {
+      throw new BadRequestException('No tienes permiso para modificar este producto');
+    }
+
+    if (dto.active === true && current.active === false && current.storeId) {
+      const store = await this.prisma.store.findUnique({ where: { id: current.storeId } });
+      if (store) {
+        if (store.plan === 'FREE') {
+          const activeCount = await this.prisma.product.count({
+            where: { storeId: current.storeId, active: true }
+          });
+          if (activeCount >= 10) {
+            throw new BadRequestException('El plan gratuito está limitado a un máximo de 10 productos activos');
+          }
+        }
+        if (new Date() > store.planExpiresAt && store.balance < 5000) {
+          throw new BadRequestException('Saldo insuficiente para activar productos. Debes realizar una recarga.');
+        }
+      }
+    }
 
     const product = await this.prisma.product.update({
       where: { id },
@@ -91,6 +144,7 @@ export class ProductsService {
         dailyStock: dto.dailyStock,
         preparationMode: dto.preparationMode as any,
         supplier: dto.supplierId ? { connect: { id: dto.supplierId } } : (dto.type === 'OWN' ? { disconnect: true } : undefined),
+        active: dto.active,
       },
     });
 

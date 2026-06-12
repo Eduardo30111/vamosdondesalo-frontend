@@ -155,6 +155,7 @@ export class OrdersService {
       }
     }
 
+    const itemsSubtotal = total;
     total += deliveryFee;
 
     // Generate tracking code for delivery orders
@@ -173,27 +174,41 @@ export class OrdersService {
     // All orders start UNPAID — payment is registered separately via /payments or /orders/:id/fiar
     const initialPaymentStatus = 'UNPAID';
 
-    const order = await this.prisma.order.create({
-      data: {
-        type: dto.type as any,
-        tableId: dto.tableId,
-        customerName: dto.customerName,
-        customerPhone: dto.customerPhone,
-        customerAddress: dto.customerAddress,
-        deliveryZoneId: dto.deliveryZoneId,
-        deliveryFee,
-        notes: dto.notes,
-        total,
-        trackingCode,
-        fulfillmentStatus: initialFulfillmentStatus as any,
-        paymentStatus: initialPaymentStatus as any,
-        items: { create: items },
-      },
-      include: {
-        items: { include: { product: true } },
-        table: true,
-        deliveryZone: true,
-      },
+    const order = await this.prisma.$transaction(async (tx) => {
+      if (dto.storeId) {
+        const store = await tx.store.findUnique({ where: { id: dto.storeId } });
+        if (store) {
+          const commission = itemsSubtotal * store.commissionRate;
+          await tx.store.update({
+            where: { id: dto.storeId },
+            data: { balance: { decrement: commission } },
+          });
+        }
+      }
+
+      return tx.order.create({
+        data: {
+          type: dto.type as any,
+          tableId: dto.tableId,
+          customerName: dto.customerName,
+          customerPhone: dto.customerPhone,
+          customerAddress: dto.customerAddress,
+          deliveryZoneId: dto.deliveryZoneId,
+          deliveryFee,
+          notes: dto.notes,
+          total,
+          trackingCode,
+          fulfillmentStatus: initialFulfillmentStatus as any,
+          paymentStatus: initialPaymentStatus as any,
+          items: { create: items },
+          storeId: dto.storeId,
+        },
+        include: {
+          items: { include: { product: true } },
+          table: true,
+          deliveryZone: true,
+        },
+      });
     });
 
     // Si no tiene items preparados (todos vitrina), descontar stock vitrina
@@ -362,5 +377,101 @@ export class OrdersService {
     const legacy = mapOrderLegacyStatus(updatedOrder);
     this.realtime.emitOrderStatusChanged(legacy);
     return legacy;
+  }
+
+  async findStoreOrders(storeId: string, status?: string) {
+    const where: any = { storeId };
+    if (status) where.fulfillmentStatus = status as any;
+    return this.prisma.order
+      .findMany({
+        where,
+        include: {
+          items: { include: { product: true } },
+          table: true,
+          payments: true,
+          deliveryZone: true,
+        },
+        orderBy: { createdAt: 'desc' },
+      })
+      .then((orders) => orders.map(mapOrderLegacyStatus));
+  }
+
+  async findStoreActive(storeId: string) {
+    return this.prisma.order
+      .findMany({
+        where: {
+          storeId,
+          fulfillmentStatus: { in: ['PENDING', 'PREPARING', 'READY', 'DELIVERED'] },
+        },
+        include: {
+          items: { include: { product: true } },
+          table: true,
+          deliveryZone: true,
+          payments: true,
+        },
+        orderBy: { createdAt: 'asc' },
+      })
+      .then((orders) => orders.map(mapOrderLegacyStatus));
+  }
+
+  async findStoreCocina(storeId: string) {
+    return this.prisma.order
+      .findMany({
+        where: {
+          storeId,
+          fulfillmentStatus: { in: ['PENDING', 'PREPARING', 'READY'] },
+        },
+        include: {
+          items: {
+            where: { isPrep: true },
+            include: { product: true },
+          },
+          table: true,
+          deliveryZone: true,
+        },
+        orderBy: { createdAt: 'asc' },
+      })
+      .then((orders) => orders.map(mapOrderLegacyStatus));
+  }
+
+  async findStoreDeliveries(storeId: string) {
+    return this.prisma.order
+      .findMany({
+        where: {
+          storeId,
+          type: 'DELIVERY',
+          fulfillmentStatus: { in: ['PENDING', 'PREPARING', 'READY', 'IN_TRANSIT', 'DELIVERED'] },
+        },
+        include: {
+          items: { include: { product: true } },
+          deliveryZone: true,
+        },
+        orderBy: { createdAt: 'asc' },
+      })
+      .then((orders) => orders.map(mapOrderLegacyStatus));
+  }
+
+  async findStoreOrdersByOwner(ownerId: string, status?: string) {
+    const store = await this.prisma.store.findUnique({ where: { ownerId } });
+    if (!store) throw new BadRequestException('El usuario no posee una tienda');
+    return this.findStoreOrders(store.id, status);
+  }
+
+  async findStoreActiveByOwner(ownerId: string) {
+    const store = await this.prisma.store.findUnique({ where: { ownerId } });
+    if (!store) throw new BadRequestException('El usuario no posee una tienda');
+    return this.findStoreActive(store.id);
+  }
+
+  async findStoreCocinaByOwner(ownerId: string) {
+    const store = await this.prisma.store.findUnique({ where: { ownerId } });
+    if (!store) throw new BadRequestException('El usuario no posee una tienda');
+    return this.findStoreCocina(store.id);
+  }
+
+  async findStoreDeliveriesByOwner(ownerId: string) {
+    const store = await this.prisma.store.findUnique({ where: { ownerId } });
+    if (!store) throw new BadRequestException('El usuario no posee una tienda');
+    return this.findStoreDeliveries(store.id);
   }
 }

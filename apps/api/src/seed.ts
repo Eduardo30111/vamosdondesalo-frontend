@@ -7,9 +7,14 @@ async function main() {
   console.log('🌱 Seeding database...');
 
   // Limpiar tablas principales (sin dependencias circulares destructivas)
+  try {
+    // @ts-ignore
+    await prisma.user.updateMany({ data: { storeId: null } });
+  } catch { /* ignore */ }
+
   const tablas = [
     'payment', 'orderItem', 'order', 'productionOrder', 'vitrinaStock', 'product', 'table',
-    'deliveryZone', 'user', 'supplier', 'paymentMethodConfig', 'appConfig',
+    'deliveryZone', 'user', 'store', 'supplier', 'paymentMethodConfig', 'appConfig',
   ];
   for (const t of tablas) {
     try {
@@ -25,6 +30,27 @@ async function main() {
     prisma.user.create({ data: { name: 'Vendedor María', email: 'vendedor@salo.co', passwordHash: await hash('vendedor123'), role: 'VENDEDOR' } }),
     prisma.user.create({ data: { name: 'Cocina Carlos', email: 'cocina@salo.co', passwordHash: await hash('cocina123'), role: 'COCINA' } }),
   ]);
+
+  // Crear la tienda default "Donde Salo!" y asociarla al admin como propietario
+  const store = await prisma.store.create({
+    data: {
+      name: 'Donde Salo!',
+      description: 'El templo de los fritos y la comida rápida',
+      whatsappNumber: '573001234567',
+      category: 'RESTAURANT',
+      plan: 'PRO',
+      planExpiresAt: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000), // 1 año
+      commissionRate: 0.04,
+      balance: 100000.0, // Saldo inicial
+      ownerId: admin.id,
+    },
+  });
+
+  // Asociar los usuarios operativos de "Donde Salo!" a su respectiva tienda
+  await prisma.user.updateMany({
+    where: { id: { in: [admin.id, vendedor.id, cocina.id] } },
+    data: { storeId: store.id },
+  });
 
   const supplier = await prisma.supplier.create({ data: { name: 'Coca Cola Colombia', phone: '3001234567' } });
 
@@ -53,6 +79,7 @@ async function main() {
           type: p.type,
           preparationMode: p.preparationMode,
           supplier: p.supplierId ? { connect: { id: p.supplierId } } : undefined,
+          store: { connect: { id: store.id } },
         },
       }),
     ),

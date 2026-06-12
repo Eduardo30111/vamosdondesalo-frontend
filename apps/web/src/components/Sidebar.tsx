@@ -32,6 +32,7 @@ import { useState, useEffect } from 'react';
 
 const adminLinks = [
   { href: '/admin', label: 'Dashboard', icon: LayoutDashboard },
+  { href: '/admin/tiendas', label: 'Tiendas', icon: Store },
   { href: '/vitrina', label: 'Vitrina', icon: DollarSign },
   { href: '/pos', label: 'POS', icon: ShoppingCart },
   { href: '/cocina', label: 'Cocina', icon: ChefHat },
@@ -46,6 +47,13 @@ const adminLinks = [
   { href: '/admin/pagos', label: 'Métodos Pago', icon: CreditCard },
   { href: '/admin/usuarios', label: 'Usuarios', icon: Users },
   { href: '/admin/configuracion', label: 'Configuración', icon: Settings },
+];
+
+const merchantLinks = [
+  { href: '/merchant', label: 'Dashboard', icon: LayoutDashboard },
+  { href: '/merchant/productos', label: 'Mis Productos', icon: Package },
+  { href: '/merchant/staff', label: 'Mi Personal', icon: Users },
+  { href: '/merchant/configuracion', label: 'Configuración', icon: Settings },
 ];
 
 const vendedorLinks = [
@@ -82,7 +90,14 @@ export function Sidebar() {
     router.push('/login');
   };
 
-  const links = user?.role === 'ADMIN' ? adminLinks : user?.role === 'VENDEDOR' ? vendedorLinks : cocinaLinks;
+  const links =
+    user?.role === 'ADMIN'
+      ? adminLinks
+      : user?.role === 'MERCHANT'
+      ? merchantLinks
+      : user?.role === 'VENDEDOR' || user?.role === 'MERCHANT_STAFF'
+      ? vendedorLinks
+      : cocinaLinks;
 
   const sidebarContent = (
     <>

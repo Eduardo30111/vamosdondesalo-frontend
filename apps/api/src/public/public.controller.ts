@@ -81,13 +81,45 @@ export class PublicController {
 
     const [vitrinaProducts, authorizedPrepared] = await Promise.all([
       this.prisma.product.findMany({
-        where: { active: true, preparationMode: 'VITRINA' },
-        include: { vitrinaStock: true },
+        where: {
+          active: true,
+          preparationMode: 'VITRINA',
+          OR: [
+            { store: null },
+            {
+              store: {
+                active: true,
+                OR: [
+                  { planExpiresAt: { gt: new Date() } },
+                  { balance: { gte: 5000 } }
+                ]
+              }
+            }
+          ]
+        },
+        include: { vitrinaStock: true, store: true },
         orderBy: { name: 'asc' },
       }),
       this.prisma.preparedAuthorization.findMany({
-        where: { date },
-        include: { product: true },
+        where: {
+          date,
+          product: {
+            active: true,
+            OR: [
+              { store: null },
+              {
+                store: {
+                  active: true,
+                  OR: [
+                    { planExpiresAt: { gt: new Date() } },
+                    { balance: { gte: 5000 } }
+                  ]
+                }
+              }
+            ]
+          }
+        },
+        include: { product: { include: { store: true } } },
       }),
     ]);
 

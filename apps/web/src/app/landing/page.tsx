@@ -4,7 +4,27 @@ import { useEffect, useState, useCallback } from 'react';
 import Link from 'next/link';
 import { toast } from 'sonner';
 
-import { MapPin, Phone, Search, Clock, ShoppingCart, Plus, Minus, Trash2, X, ChevronLeft, ChevronRight, User, LayoutDashboard, ChefHat, ShoppingBag } from 'lucide-react';
+import {
+  MapPin,
+  Phone,
+  Search,
+  Clock,
+  ShoppingCart,
+  Plus,
+  Minus,
+  Trash2,
+  X,
+  ChevronLeft,
+  ChevronRight,
+  User,
+  LayoutDashboard,
+  ChefHat,
+  ShoppingBag,
+  ArrowLeft,
+  CheckCircle,
+  Store as StoreIcon,
+  HelpCircle
+} from 'lucide-react';
 
 interface Product {
   id: string;
@@ -14,6 +34,8 @@ interface Product {
   photoUrl: string | null;
   remaining?: number;
   preparationMode?: string;
+  storeId: string | null;
+  store?: Store | null;
 }
 
 interface AppConfig {
@@ -21,7 +43,17 @@ interface AppConfig {
   business_logo_url: string;
   business_color: string;
   whatsapp_number: string;
-  banners?: string[];
+}
+
+interface Store {
+  id: string;
+  name: string;
+  description: string | null;
+  logoUrl: string | null;
+  bannerUrl: string | null;
+  whatsappNumber: string;
+  category: string;
+  active: boolean;
 }
 
 interface CartItem {
@@ -37,11 +69,11 @@ interface AuthUser {
 export default function LandingPage() {
   const [config, setConfig] = useState<AppConfig | null>(null);
   const [products, setProducts] = useState<Product[]>([]);
+  const [stores, setStores] = useState<Store[]>([]);
   const [trackingCode, setTrackingCode] = useState('');
   const [cart, setCart] = useState<CartItem[]>([]);
   const [showCart, setShowCart] = useState(false);
   const [showCheckout, setShowCheckout] = useState(false);
-  const [currentBanner, setCurrentBanner] = useState(0);
   const [customerData, setCustomerData] = useState({
     name: '',
     phone: '',
@@ -50,13 +82,38 @@ export default function LandingPage() {
   });
   const [deliveryZones, setDeliveryZones] = useState<Array<{ id: string; name: string; fee: number }>>([]);
   const [user, setUser] = useState<AuthUser | null>(null);
+  const [selectedStore, setSelectedStore] = useState<Store | null>(null);
+  const [selectedCategory, setSelectedCategory] = useState<string>('TODOS');
+  const [searchStoreQuery, setSearchStoreQuery] = useState('');
+  const [searchProductQuery, setSearchProductQuery] = useState('');
+  const [checkoutSuccessOrders, setCheckoutSuccessOrders] = useState<Array<{ trackingCode: string; storeName: string; whatsappUrl: string }>>([]);
 
   const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000';
 
   useEffect(() => {
-    fetch(`${API_URL}/public/config`).then((r) => r.json()).then(setConfig);
-    fetch(`${API_URL}/public/products`).then((r) => r.json()).then(setProducts);
-    fetch(`${API_URL}/public/delivery-zones`).then((r) => r.json()).then(setDeliveryZones);
+    // Load config
+    fetch(`${API_URL}/public/config`)
+      .then((r) => r.json())
+      .then(setConfig)
+      .catch((e) => console.error('Error fetching config:', e));
+
+    // Load products
+    fetch(`${API_URL}/public/products`)
+      .then((r) => r.json())
+      .then(setProducts)
+      .catch((e) => console.error('Error fetching products:', e));
+
+    // Load stores
+    fetch(`${API_URL}/stores`)
+      .then((r) => r.json())
+      .then(setStores)
+      .catch((e) => console.error('Error fetching stores:', e));
+
+    // Load delivery zones
+    fetch(`${API_URL}/public/delivery-zones`)
+      .then((r) => r.json())
+      .then(setDeliveryZones)
+      .catch((e) => console.error('Error fetching delivery zones:', e));
     
     // Check if user is logged in
     const token = localStorage.getItem('token');
@@ -69,29 +126,6 @@ export default function LandingPage() {
       }
     }
   }, [API_URL]);
-
-  // Carrusel auto-play
-  const banners = config?.banners?.length ? config.banners : [
-    'https://images.unsplash.com/photo-1565299624946-b28f40a0ae38?w=1200&h=400&fit=crop',
-    'https://images.unsplash.com/photo-1555939594-58d7cb561ad1?w=1200&h=400&fit=crop',
-    'https://images.unsplash.com/photo-1544025162-d76694265947?w=1200&h=400&fit=crop',
-  ];
-
-  useEffect(() => {
-    if (banners.length <= 1) return;
-    const interval = setInterval(() => {
-      setCurrentBanner((prev) => (prev + 1) % banners.length);
-    }, 5000);
-    return () => clearInterval(interval);
-  }, [banners.length]);
-
-  const nextBanner = useCallback(() => {
-    setCurrentBanner((prev) => (prev + 1) % banners.length);
-  }, [banners.length]);
-
-  const prevBanner = useCallback(() => {
-    setCurrentBanner((prev) => (prev - 1 + banners.length) % banners.length);
-  }, [banners.length]);
 
   // Cart functions
   const addToCart = (product: Product) => {
@@ -139,28 +173,61 @@ export default function LandingPage() {
     setCart((prev) => prev.filter((item) => item.product.id !== productId));
   };
 
-  const cartTotal = cart.reduce((sum, item) => sum + item.product.salePrice * item.qty, 0);
-  
-  const getDeliveryFee = () => {
+  // Group cart items by store
+  const getGroupedCart = useCallback(() => {
+    return cart.reduce<Record<string, { store: Store | { id: string; name: string; whatsappNumber: string; logoUrl: string | null; category: string }; items: CartItem[] }>>((acc, item) => {
+      const storeVal = item.product.store || {
+        id: 'legacy-salo',
+        name: config?.business_name || 'Donde Salo!',
+        whatsappNumber: config?.whatsapp_number || '573001234567',
+        logoUrl: config?.business_logo_url || null,
+        category: 'RESTAURANT',
+      };
+      const storeId = storeVal.id;
+      if (!acc[storeId]) {
+        acc[storeId] = { store: storeVal as any, items: [] };
+      }
+      acc[storeId].items.push(item);
+      return acc;
+    }, {});
+  }, [cart, config]);
+
+  const getStoreDeliveryFee = useCallback((storeSubtotal: number) => {
     if (!customerData.zone) return 0;
     const zone = deliveryZones.find((z) => z.id === customerData.zone);
     if (!zone) return 0;
     
     const zoneNameClean = zone.name.toLowerCase().trim();
     if (zoneNameClean.includes('puerto colombia') || zoneNameClean.includes('puerto col') || zoneNameClean.includes('pradomar')) {
-      if (cartTotal > 10000) {
+      if (storeSubtotal > 10000) {
         return 0;
       }
     } else if (zoneNameClean.includes('salgar')) {
-      if (cartTotal >= 18000) {
+      if (storeSubtotal >= 18000) {
         return 0;
       }
     }
     return zone.fee;
-  };
+  }, [customerData.zone, deliveryZones]);
 
-  const deliveryFee = getDeliveryFee();
-  const total = cartTotal + deliveryFee;
+  // Totals calculations
+  const groupedCart = getGroupedCart();
+  const storeTotals = Object.keys(groupedCart).map((storeId) => {
+    const group = groupedCart[storeId];
+    const subtotal = group.items.reduce((sum, item) => sum + item.product.salePrice * item.qty, 0);
+    const deliveryFee = getStoreDeliveryFee(subtotal);
+    return {
+      storeId,
+      storeName: group.store.name,
+      subtotal,
+      deliveryFee,
+      total: subtotal + deliveryFee,
+    };
+  });
+
+  const cartTotal = cart.reduce((sum, item) => sum + item.product.salePrice * item.qty, 0);
+  const totalDeliveryFee = storeTotals.reduce((sum, t) => sum + t.deliveryFee, 0);
+  const grandTotal = cartTotal + totalDeliveryFee;
   const cartCount = cart.reduce((sum, item) => sum + item.qty, 0);
 
   const handleCheckout = async () => {
@@ -172,72 +239,141 @@ export default function LandingPage() {
       alert('El carrito está vacío');
       return;
     }
-    // Validar stock para productos de vitrina
+
+    // Validate vitrina stock
     for (const item of cart) {
       if (item.product.remaining !== undefined) {
         if (item.qty > item.product.remaining) {
-          alert(`No hay suficiente stock de "${item.product.name}" en la vitrina (Disponible: ${item.product.remaining})`);
+          alert(`No hay suficiente stock de "${item.product.name}" (Disponible: ${item.product.remaining})`);
           return;
         }
       }
     }
 
-    try {
-      const res = await fetch(`${API_URL}/public/orders`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          type: 'DELIVERY',
-          customerName: customerData.name,
-          customerPhone: customerData.phone,
-          customerAddress: customerData.address,
-          deliveryZoneId: customerData.zone,
-          deliveryFee,
-          items: cart.map((item) => ({
-            productId: item.product.id,
-            qty: item.qty,
-            unitPrice: item.product.salePrice,
-          })),
-          total,
-        }),
-      });
+    const createdOrders: Array<{ trackingCode: string; storeName: string; whatsappUrl: string }> = [];
+    const keys = Object.keys(groupedCart);
+    
+    setCheckoutSuccessOrders([]);
 
-      if (!res.ok) throw new Error('Error creando pedido');
+    for (const storeId of keys) {
+      const group = groupedCart[storeId];
+      const storeSubtotal = group.items.reduce((sum, item) => sum + item.product.salePrice * item.qty, 0);
+      const storeDeliveryFee = getStoreDeliveryFee(storeSubtotal);
+      
+      const payload = {
+        type: 'DELIVERY',
+        customerName: customerData.name,
+        customerPhone: customerData.phone,
+        customerAddress: customerData.address,
+        deliveryZoneId: customerData.zone,
+        deliveryFee: storeDeliveryFee,
+        items: group.items.map((item) => ({
+          productId: item.product.id,
+          qty: item.qty,
+          unitPrice: item.product.salePrice,
+        })),
+        total: storeSubtotal + storeDeliveryFee,
+        storeId: storeId === 'legacy-salo' ? undefined : storeId,
+      };
 
-      const order = await res.json();
-      alert(`¡Pedido creado! Tu código de seguimiento es: ${order.trackingCode || 'SALO-XXXXX'}`);
-      setCart([]);
-      setShowCheckout(false);
-      setShowCart(false);
-      setCustomerData({ name: '', phone: '', address: '', zone: '' });
-    } catch (err) {
-      alert('Error al crear el pedido. Intenta de nuevo.');
+      try {
+        const res = await fetch(`${API_URL}/public/orders`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
+        if (!res.ok) throw new Error(`Error en tienda ${group.store.name}`);
+        const order = await res.json();
+        
+        // Construct WhatsApp URL
+        const message = encodeURIComponent(
+          `*Vamos Donde Salo - Pedido Confirmado*\n\n` +
+          `*Código:* ${order.trackingCode || 'N/A'}\n` +
+          `*Tienda:* ${group.store.name}\n` +
+          `*Cliente:* ${customerData.name}\n` +
+          `*Teléfono:* ${customerData.phone}\n` +
+          `*Dirección:* ${customerData.address}\n\n` +
+          `*Productos:*\n` +
+          group.items.map((it) => `- ${it.qty}x ${it.product.name} ($${it.product.salePrice.toLocaleString('es-CO')})`).join('\n') + `\n\n` +
+          `*Subtotal:* $${storeSubtotal.toLocaleString('es-CO')}\n` +
+          `*Domicilio:* $${storeDeliveryFee.toLocaleString('es-CO')}\n` +
+          `*Total:* $${(storeSubtotal + storeDeliveryFee).toLocaleString('es-CO')}\n\n` +
+          `Por favor, confirma mi pedido. ¡Muchas gracias!`
+        );
+        const rawPhone = group.store.whatsappNumber.replace('+', '').replace(/\s+/g, '').trim();
+        const whatsappUrl = `https://wa.me/${rawPhone}?text=${message}`;
+
+        createdOrders.push({
+          trackingCode: order.trackingCode || 'SALO-XXXXX',
+          storeName: group.store.name,
+          whatsappUrl,
+        });
+      } catch (err) {
+        console.error(err);
+        alert(`Hubo un problema registrando el pedido en la tienda ${group.store.name}. Intente de nuevo.`);
+        return;
+      }
+    }
+
+    if (createdOrders.length > 0) {
+      setCheckoutSuccessOrders(createdOrders);
     }
   };
 
   const bgColor = config?.business_color || '#F97316';
 
+  // Filter stores
+  const defaultStore = stores.find((s) => s.name.toLowerCase().includes('donde salo'));
+  const otherStores = stores.filter((s) => s.active && !s.name.toLowerCase().includes('donde salo'));
+
+  const filteredStores = otherStores.filter((s) => {
+    const matchesCategory = selectedCategory === 'TODOS' || s.category === selectedCategory;
+    const matchesSearch = s.name.toLowerCase().includes(searchStoreQuery.toLowerCase()) || 
+                          (s.description && s.description.toLowerCase().includes(searchStoreQuery.toLowerCase()));
+    return matchesCategory && matchesSearch;
+  });
+
+  // Filter products for the selected store
+  const storeProducts = products.filter((p) => {
+    const matchesStore = selectedStore
+      ? (selectedStore.id === 'legacy-salo' ? (!p.storeId || p.storeId === selectedStore.id) : p.storeId === selectedStore.id)
+      : true;
+    const matchesSearch = p.name.toLowerCase().includes(searchProductQuery.toLowerCase()) || 
+                          (p.description && p.description.toLowerCase().includes(searchProductQuery.toLowerCase()));
+    return matchesStore && matchesSearch;
+  });
+
+  const getCategoryLabel = (category: string) => {
+    switch (category) {
+      case 'RESTAURANT': return 'Comida / Restaurantes';
+      case 'SALUD': return 'Salud';
+      case 'TIENDA': return 'Tiendas';
+      case 'COMPRA_VENTA': return 'Compra y Venta';
+      default: return category;
+    }
+  };
+
   return (
-    <div className="min-h-screen bg-gray-50 dark:bg-gray-900">
+    <div className="min-h-screen bg-gray-50 dark:bg-gray-900 text-gray-800 dark:text-gray-100 flex flex-col font-sans transition-colors duration-300">
       {/* Header */}
-      <header className="sticky top-0 z-50 bg-white dark:bg-gray-800 shadow-sm border-b dark:border-gray-700">
-        <div className="max-w-6xl mx-auto px-4 py-3 flex items-center justify-between">
-          <Link href="/" className="flex items-center gap-2.5 text-xl font-bold" style={{ color: bgColor }}>
+      <header className="sticky top-0 z-40 bg-white/85 dark:bg-gray-800/85 backdrop-blur-md shadow-sm border-b border-gray-100 dark:border-gray-700 transition">
+        <div className="max-w-6xl mx-auto px-4 py-3.5 flex items-center justify-between">
+          <button onClick={() => setSelectedStore(null)} className="flex items-center gap-2.5 text-xl font-bold" style={{ color: bgColor }}>
             <img
               src="/logo.jpg"
               alt="Logo Vamos Donde Salo"
-              className="w-9 h-9 rounded-full object-cover border border-gray-100 dark:border-gray-700 shadow-sm"
+              className="w-10 h-10 rounded-full object-cover border border-gray-100 dark:border-gray-700 shadow-sm"
             />
-            <span>{config?.business_name || 'Donde Salo!'}</span>
-          </Link>
-          <div className="flex items-center gap-3">
+            <span className="bg-gradient-to-r from-orange-500 to-amber-500 bg-clip-text text-transparent">{config?.business_name || 'Vamos Donde Salo'}</span>
+          </button>
+          <div className="flex items-center gap-4">
             <button
               onClick={() => setShowCart(true)}
-              className="relative p-2 rounded-xl hover:bg-gray-100 dark:hover:bg-gray-700 transition"
+              className="relative p-2.5 rounded-xl hover:bg-gray-100 dark:hover:bg-gray-700 transition"
             >
-              <ShoppingCart size={24} style={{ color: bgColor }} />
+              <ShoppingCart size={22} style={{ color: bgColor }} />
               {cartCount > 0 && (
-                <span className="absolute -top-1 -right-1 w-5 h-5 bg-red-500 text-white text-xs rounded-full flex items-center justify-center font-bold">
+                <span className="absolute -top-1 -right-1 w-5 h-5 bg-red-500 text-white text-xs rounded-full flex items-center justify-center font-bold animate-pulse">
                   {cartCount}
                 </span>
               )}
@@ -246,196 +382,360 @@ export default function LandingPage() {
             {user ? (
               <div className="flex items-center gap-2">
                 <Link 
-                  href={user.role === 'ADMIN' ? '/admin' : user.role === 'VENDEDOR' ? '/pos' : '/cocina'}
-                  className="flex items-center gap-2 px-4 py-2 rounded-xl text-white font-bold text-sm hover:opacity-90 transition"
+                  href={
+                    user.role === 'ADMIN' 
+                      ? '/admin' 
+                      : user.role === 'MERCHANT' 
+                      ? '/merchant' 
+                      : user.role === 'VENDEDOR' || user.role === 'MERCHANT_STAFF'
+                      ? '/pos' 
+                      : '/cocina'
+                  }
+                  className="flex items-center gap-2 px-4 py-2 rounded-xl text-white font-bold text-sm hover:opacity-90 shadow-sm transition"
                   style={{ backgroundColor: bgColor }}
                 >
-                  {user.role === 'ADMIN' && <LayoutDashboard size={16} />}
-                  {user.role === 'VENDEDOR' && <ShoppingBag size={16} />}
-                  {user.role === 'COCINA' && <ChefHat size={16} />}
+                  {user.role === 'ADMIN' && <LayoutDashboard size={15} />}
+                  {user.role === 'MERCHANT' && <StoreIcon size={15} />}
+                  {(user.role === 'VENDEDOR' || user.role === 'MERCHANT_STAFF') && <ShoppingBag size={15} />}
+                  {user.role === 'COCINA' && <ChefHat size={15} />}
                   {user.role === 'ADMIN' && 'Panel Admin'}
-                  {user.role === 'VENDEDOR' && 'POS Vendedor'}
+                  {user.role === 'MERCHANT' && 'Mi Tienda'}
+                  {(user.role === 'VENDEDOR' || user.role === 'MERCHANT_STAFF') && 'Ventas POS'}
                   {user.role === 'COCINA' && 'Cocina'}
                 </Link>
               </div>
             ) : (
-              <Link href="/login" className="px-4 py-2 bg-gray-900 text-white rounded-xl font-bold text-sm hover:opacity-90 transition">
-                Entrar
-              </Link>
+              <div className="flex items-center gap-3">
+                <Link href="/register-merchant" className="text-sm font-semibold hover:opacity-85 text-gray-600 dark:text-gray-300">
+                  Soy Comerciante
+                </Link>
+                <Link href="/login" className="px-4 py-2 bg-gray-950 dark:bg-gray-100 dark:text-gray-900 text-white rounded-xl font-bold text-sm hover:opacity-90 transition">
+                  Entrar
+                </Link>
+              </div>
             )}
           </div>
         </div>
       </header>
 
-      {/* Banner Carrusel */}
-      <div className="relative w-full h-48 md:h-72 lg:h-96 overflow-hidden">
-        {banners.map((banner, i) => (
-          <div
-            key={i}
-            className={`absolute inset-0 transition-opacity duration-700 ${i === currentBanner ? 'opacity-100' : 'opacity-0'}`}
-          >
-            <img
-              src={banner}
-              alt={`Banner ${i + 1}`}
-              className="absolute inset-0 w-full h-full object-cover"
-            />
-            <div className="absolute inset-0 bg-gradient-to-t from-black/60 to-transparent" />
-          </div>
-        ))}
-        {banners.length > 1 && (
-          <>
-            <button
-              onClick={prevBanner}
-              className="absolute left-4 top-1/2 -translate-y-1/2 w-10 h-10 bg-white/80 dark:bg-black/50 rounded-full flex items-center justify-center hover:bg-white transition"
-            >
-              <ChevronLeft size={20} />
-            </button>
-            <button
-              onClick={nextBanner}
-              className="absolute right-4 top-1/2 -translate-y-1/2 w-10 h-10 bg-white/80 dark:bg-black/50 rounded-full flex items-center justify-center hover:bg-white transition"
-            >
-              <ChevronRight size={20} />
-            </button>
-            <div className="absolute bottom-4 left-1/2 -translate-x-1/2 flex gap-2">
-              {banners.map((_, i) => (
-                <button
-                  key={i}
-                  onClick={() => setCurrentBanner(i)}
-                  className={`w-2 h-2 rounded-full transition ${i === currentBanner ? 'bg-white w-6' : 'bg-white/50'}`}
-                />
-              ))}
-            </div>
-          </>
-        )}
-      </div>
+      {/* Main Content */}
+      <main className="flex-grow">
+        {!selectedStore ? (
+          // Marketplace View
+          <div>
+            {/* Hero Section */}
+            <section className="relative overflow-hidden py-16 px-4 bg-gradient-to-br from-orange-500/10 via-amber-500/5 to-transparent border-b border-gray-100 dark:border-gray-800">
+              <div className="max-w-4xl mx-auto text-center space-y-6">
+                <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-orange-100 dark:bg-orange-950/40 text-orange-600 dark:text-orange-400">
+                  <StoreIcon size={12} /> Portal Marketplace Local
+                </span>
+                <h1 className="text-4xl md:text-5xl font-black tracking-tight text-gray-900 dark:text-white leading-tight">
+                  Todo lo que necesitas, <br/>
+                  <span className="bg-gradient-to-r from-orange-500 to-amber-500 bg-clip-text text-transparent">en un solo lugar</span>
+                </h1>
+                <p className="text-base md:text-lg text-gray-600 dark:text-gray-300 max-w-2xl mx-auto font-medium">
+                  Vamos Donde Salo es un centro de comercio virtual donde compradores y vendedores de Puerto Colombia y Salgar se conectan. Compra comida rápida, productos de salud, compras, servicios y más. Todo contra entrega.
+                </p>
 
-      {/* Track Order */}
-      <section className="py-6 px-4 bg-white dark:bg-gray-800 border-b dark:border-gray-700">
-        <div className="max-w-md mx-auto flex gap-2">
-          <div className="flex-1 relative">
-            <Search size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
-            <input
-              type="text"
-              placeholder="Código de seguimiento (ej: SALO-ABCDE)"
-              value={trackingCode}
-              onChange={(e) => setTrackingCode(e.target.value)}
-              className="w-full pl-10 pr-4 py-3 rounded-xl border border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 outline-none focus:ring-2 focus:ring-orange-400"
-            />
-          </div>
-          <Link href={`/seguir-pedido?code=${encodeURIComponent(trackingCode)}`} className="px-6 py-3 text-white rounded-xl font-bold hover:opacity-90 transition flex items-center gap-2" style={{ backgroundColor: bgColor }}>
-            <Clock size={18} /> Seguir
-          </Link>
-        </div>
-      </section>
+                {/* Track Order Input */}
+                <div className="max-w-md mx-auto flex gap-2 pt-4">
+                  <div className="flex-1 relative">
+                    <Search size={18} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-gray-400" />
+                    <input
+                      type="text"
+                      placeholder="Seguimiento (ej: SALO-ABCDE)"
+                      value={trackingCode}
+                      onChange={(e) => setTrackingCode(e.target.value)}
+                      className="w-full pl-11 pr-4 py-3 rounded-2xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 outline-none focus:ring-2 focus:ring-orange-400 shadow-sm text-sm"
+                    />
+                  </div>
+                  <Link 
+                    href={`/seguir-pedido?code=${encodeURIComponent(trackingCode)}`} 
+                    className="px-5 py-3 text-white rounded-2xl font-bold hover:opacity-95 shadow-md transition flex items-center gap-2 text-sm" 
+                    style={{ backgroundColor: bgColor }}
+                  >
+                    <Clock size={16} /> Seguir
+                  </Link>
+                </div>
+              </div>
+            </section>
 
-      {/* Product Showcase */}
-      <section className="py-12 px-4 max-w-6xl mx-auto">
-        <h2 className="text-2xl font-bold text-center mb-8">Nuestros Productos</h2>
-        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
-          {products.map((product) => (
-            <div key={product.id} className="bg-white dark:bg-gray-800 rounded-2xl p-3 shadow-sm border border-gray-100 dark:border-gray-700 flex flex-col">
-              <div className="aspect-square rounded-xl overflow-hidden mb-3 bg-gray-100 dark:bg-gray-700 relative">
-                {product.photoUrl ? (
-                  <img src={product.photoUrl} alt={product.name} className="w-full h-full object-cover" />
-                ) : (
-                  <div className="w-full h-full flex items-center justify-center text-gray-400 text-sm">Sin imagen</div>
+            {/* Showcase Fritos Donde Salo! */}
+            {defaultStore && (
+              <section className="py-10 px-4 max-w-6xl mx-auto">
+                <div className="bg-gradient-to-r from-orange-500 to-amber-500 rounded-3xl p-6 md:p-8 text-white shadow-xl flex flex-col md:flex-row items-center justify-between gap-6 hover:shadow-2xl transition duration-300">
+                  <div className="space-y-3 text-center md:text-left">
+                    <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-white/20 text-white uppercase tracking-wider">
+                      ★ Tienda Destacada Original
+                    </div>
+                    <h2 className="text-3xl font-black">{defaultStore.name}</h2>
+                    <p className="text-white/95 text-sm md:text-base max-w-xl">
+                      {defaultStore.description || 'El templo de los mejores fritos y comida rápida. Arepas de huevo, empanadas, hamburguesas y más.'}
+                    </p>
+                  </div>
+                  <button
+                    onClick={() => setSelectedStore({
+                      ...defaultStore,
+                      id: defaultStore.id || 'legacy-salo'
+                    })}
+                    className="px-6 py-4 bg-white text-orange-600 font-extrabold rounded-2xl hover:bg-orange-50 active:scale-95 transition shadow-md w-full md:w-auto text-center shrink-0"
+                  >
+                    ¡Entrar a la tienda original aquí!
+                  </button>
+                </div>
+              </section>
+            )}
+
+            {/* Other Stores Marketplace List */}
+            <section className="py-8 px-4 max-w-6xl mx-auto space-y-8">
+              <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-gray-200/60 dark:border-gray-800 pb-5">
+                <div>
+                  <h3 className="text-2xl font-bold tracking-tight">Otras Tiendas & Negocios</h3>
+                  <p className="text-sm text-gray-500 dark:text-gray-400">Apoya a los comerciantes locales de tu sector</p>
+                </div>
+                {/* Search Store Bar */}
+                <div className="w-full md:max-w-xs relative">
+                  <Search size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+                  <input
+                    type="text"
+                    placeholder="Buscar tiendas..."
+                    value={searchStoreQuery}
+                    onChange={(e) => setSearchStoreQuery(e.target.value)}
+                    className="w-full pl-10 pr-4 py-2.5 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-sm outline-none focus:ring-2 focus:ring-orange-400"
+                  />
+                </div>
+              </div>
+
+              {/* Category Filters */}
+              <div className="flex gap-2 overflow-x-auto pb-3 scrollbar-hide">
+                {['TODOS', 'RESTAURANT', 'SALUD', 'TIENDA', 'COMPRA_VENTA'].map((cat) => (
+                  <button
+                    key={cat}
+                    onClick={() => setSelectedCategory(cat)}
+                    className={`px-4 py-2 rounded-xl text-sm font-bold whitespace-nowrap border transition ${
+                      selectedCategory === cat
+                        ? 'border-orange-500 bg-orange-500 text-white shadow-sm'
+                        : 'border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-750'
+                    }`}
+                  >
+                    {cat === 'TODOS' ? '🏠 Todas' : getCategoryLabel(cat)}
+                  </button>
+                ))}
+              </div>
+
+              {/* Stores Grid */}
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                {filteredStores.map((store) => (
+                  <div
+                    key={store.id}
+                    onClick={() => setSelectedStore(store)}
+                    className="bg-white dark:bg-gray-800/60 rounded-3xl p-5 border border-gray-150/50 dark:border-gray-700/50 shadow-sm hover:shadow-md hover:border-orange-500/40 dark:hover:border-orange-500/40 transition cursor-pointer flex gap-4 group"
+                  >
+                    <div className="w-16 h-16 rounded-2xl overflow-hidden bg-gray-100 dark:bg-gray-700 flex-shrink-0 border border-gray-100 dark:border-gray-750 relative">
+                      {store.logoUrl ? (
+                        <img src={store.logoUrl} alt={store.name} className="w-full h-full object-cover group-hover:scale-105 transition" />
+                      ) : (
+                        <div className="w-full h-full flex items-center justify-center text-gray-400 dark:text-gray-500"><StoreIcon size={24} /></div>
+                      )}
+                    </div>
+                    <div className="flex-grow min-w-0 space-y-1">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-[10px] font-extrabold uppercase px-2 py-0.5 rounded-md bg-orange-100 dark:bg-orange-950/40 text-orange-600 dark:text-orange-400">
+                          {getCategoryLabel(store.category)}
+                        </span>
+                      </div>
+                      <h4 className="font-bold text-base truncate group-hover:text-orange-500 transition">{store.name}</h4>
+                      <p className="text-xs text-gray-500 dark:text-gray-400 line-clamp-2 leading-relaxed">{store.description || 'Sin descripción disponible.'}</p>
+                    </div>
+                  </div>
+                ))}
+
+                {filteredStores.length === 0 && (
+                  <div className="col-span-full text-center py-16 bg-white dark:bg-gray-800/40 rounded-3xl border border-dashed border-gray-200 dark:border-gray-700">
+                    <HelpCircle size={40} className="mx-auto text-gray-400 mb-2" />
+                    <p className="text-gray-500 dark:text-gray-400 font-medium">No se encontraron tiendas en esta categoría.</p>
+                  </div>
                 )}
               </div>
-              <h3 className="font-bold text-sm truncate">{product.name}</h3>
-              <p className="text-xs text-gray-500 line-clamp-2 mb-2 flex-1">{product.description}</p>
-              <div className="flex items-center justify-between mt-auto">
-                <p className="text-lg font-bold" style={{ color: bgColor }}>${product.salePrice.toLocaleString('es-CO')}</p>
+            </section>
+          </div>
+        ) : (
+          // Store Detail View
+          <div className="max-w-6xl mx-auto px-4 py-8 space-y-8">
+            {/* Store Header Info */}
+            <div className="flex flex-col md:flex-row items-center md:items-start justify-between gap-6 border-b border-gray-200/60 dark:border-gray-800 pb-6">
+              <div className="flex flex-col md:flex-row items-center md:items-start gap-5 text-center md:text-left">
                 <button
-                  onClick={() => addToCart(product)}
-                  className="p-2 rounded-xl text-white hover:opacity-90 transition"
-                  style={{ backgroundColor: bgColor }}
+                  onClick={() => setSelectedStore(null)}
+                  className="p-3 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-2xl hover:bg-gray-50 dark:hover:bg-gray-750 transition shadow-sm mr-2"
                 >
-                  <Plus size={18} />
+                  <ArrowLeft size={18} />
                 </button>
+                <div className="w-20 h-20 rounded-2xl overflow-hidden bg-gray-100 dark:bg-gray-700 border border-gray-100 dark:border-gray-700 relative shadow-sm">
+                  {selectedStore.logoUrl ? (
+                    <img src={selectedStore.logoUrl} alt={selectedStore.name} className="w-full h-full object-cover" />
+                  ) : (
+                    <div className="w-full h-full flex items-center justify-center text-gray-400 dark:text-gray-500"><StoreIcon size={32} /></div>
+                  )}
+                </div>
+                <div className="space-y-1">
+                  <div className="flex flex-wrap justify-center md:justify-start items-center gap-2">
+                    <h2 className="text-2xl md:text-3xl font-extrabold text-gray-900 dark:text-white">{selectedStore.name}</h2>
+                    <span className="text-xs font-bold uppercase px-2.5 py-0.5 rounded-full bg-orange-100 dark:bg-orange-950/40 text-orange-600 dark:text-orange-400">
+                      {getCategoryLabel(selectedStore.category)}
+                    </span>
+                  </div>
+                  <p className="text-sm text-gray-500 dark:text-gray-400 max-w-xl">{selectedStore.description || 'Bienvenido a nuestra tienda.'}</p>
+                </div>
+              </div>
+
+              {/* Product Search Bar */}
+              <div className="w-full md:max-w-xs relative self-center">
+                <Search size={18} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-gray-400" />
+                <input
+                  type="text"
+                  placeholder="Buscar productos..."
+                  value={searchProductQuery}
+                  onChange={(e) => setSearchProductQuery(e.target.value)}
+                  className="w-full pl-10 pr-4 py-2.5 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-sm outline-none focus:ring-2 focus:ring-orange-400"
+                />
               </div>
             </div>
-          ))}
-        </div>
-        {products.length === 0 && (
-          <p className="text-center text-gray-400 py-12">No hay productos disponibles hoy</p>
+
+            {/* Products Grid */}
+            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-5">
+              {storeProducts.map((product) => (
+                <div key={product.id} className="bg-white dark:bg-gray-800/60 rounded-3xl p-3 shadow-sm border border-gray-150/40 dark:border-gray-700/60 flex flex-col hover:shadow-md transition">
+                  <div className="aspect-square rounded-2xl overflow-hidden mb-3 bg-gray-100 dark:bg-gray-700 relative border border-gray-100 dark:border-gray-700/50">
+                    {product.photoUrl ? (
+                      <img src={product.photoUrl} alt={product.name} className="w-full h-full object-cover" />
+                    ) : (
+                      <div className="w-full h-full flex items-center justify-center text-gray-400 text-xs">Sin imagen</div>
+                    )}
+                  </div>
+                  <h3 className="font-bold text-sm truncate px-1 text-gray-900 dark:text-white">{product.name}</h3>
+                  <p className="text-xs text-gray-500 line-clamp-2 mb-3 mt-1 px-1 flex-grow leading-relaxed">{product.description}</p>
+                  <div className="flex items-center justify-between mt-auto pt-2 border-t border-gray-100 dark:border-gray-700 px-1">
+                    <p className="text-base font-extrabold" style={{ color: bgColor }}>${product.salePrice.toLocaleString('es-CO')}</p>
+                    <button
+                      onClick={() => addToCart(product)}
+                      className="p-2.5 rounded-xl text-white hover:opacity-90 transition active:scale-95 shadow-sm"
+                      style={{ backgroundColor: bgColor }}
+                    >
+                      <Plus size={16} />
+                    </button>
+                  </div>
+                </div>
+              ))}
+
+              {storeProducts.length === 0 && (
+                <div className="col-span-full text-center py-16 bg-white dark:bg-gray-800/40 rounded-3xl border border-dashed border-gray-200 dark:border-gray-700">
+                  <HelpCircle size={36} className="mx-auto text-gray-400 mb-2" />
+                  <p className="text-gray-500 dark:text-gray-400 font-medium">Esta tienda no tiene productos disponibles en este momento.</p>
+                </div>
+              )}
+            </div>
+          </div>
         )}
-      </section>
+      </main>
 
       {/* Footer */}
-      <footer className="bg-white dark:bg-gray-800 border-t dark:border-gray-700 py-8 px-4 text-center">
+      <footer className="bg-white dark:bg-gray-800 border-t border-gray-100 dark:border-gray-700 py-8 px-4 text-center mt-12 transition">
         <div className="flex items-center justify-center gap-4 mb-4">
-          <a href={`https://wa.me/${config?.whatsapp_number || '573001234567'}`} target="_blank" rel="noopener noreferrer" className="p-3 bg-green-500 text-white rounded-full hover:scale-110 transition">
+          <a href={`https://wa.me/${config?.whatsapp_number || '573001234567'}`} target="_blank" rel="noopener noreferrer" className="p-3 bg-green-500 text-white rounded-full hover:scale-110 shadow-sm transition">
             <Phone size={20} />
           </a>
         </div>
-        <div className="flex items-center justify-center gap-2 text-gray-500 mb-2">
+        <div className="flex items-center justify-center gap-2 text-gray-500 mb-2 text-sm font-medium">
           <MapPin size={16} /> Puerto Colombia, Colombia
         </div>
-        <p className="text-sm text-gray-400">{config?.business_name || 'Donde Salo!'} {new Date().getFullYear()}</p>
+        <p className="text-xs text-gray-400">© {new Date().getFullYear()} {config?.business_name || 'Vamos Donde Salo'}. Todos los derechos reservados.</p>
       </footer>
 
       {/* Cart Drawer */}
       {showCart && (
         <div className="fixed inset-0 z-50 flex justify-end">
-          <div className="absolute inset-0 bg-black/50" onClick={() => setShowCart(false)} />
+          <div className="absolute inset-0 bg-black/60 backdrop-blur-xs" onClick={() => setShowCart(false)} />
           <div className="relative w-full max-w-md bg-white dark:bg-gray-800 h-full shadow-2xl flex flex-col">
-            <div className="p-4 border-b dark:border-gray-700 flex items-center justify-between">
+            <div className="p-4 border-b border-gray-100 dark:border-gray-700 flex items-center justify-between">
               <h2 className="text-lg font-bold">Tu Pedido</h2>
-              <button onClick={() => setShowCart(false)} className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg">
+              <button onClick={() => setShowCart(false)} className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition">
                 <X size={20} />
               </button>
             </div>
 
-            <div className="flex-1 overflow-y-auto p-4 space-y-4">
+            <div className="flex-1 overflow-y-auto p-4 space-y-6">
               {cart.length === 0 ? (
-                <p className="text-center text-gray-400 py-8">El carrito está vacío</p>
+                <p className="text-center text-gray-400 py-8 font-medium">El carrito está vacío</p>
               ) : (
-                cart.map((item) => (
-                  <div key={item.product.id} className="flex gap-3 bg-gray-50 dark:bg-gray-700 rounded-xl p-3">
-                    <div className="w-16 h-16 rounded-lg bg-gray-200 dark:bg-gray-600 relative overflow-hidden flex-shrink-0">
-                      {item.product.photoUrl ? (
-                        <img src={item.product.photoUrl} alt={item.product.name} className="w-full h-full object-cover" />
-                      ) : (
-                        <div className="w-full h-full flex items-center justify-center text-xs text-gray-400">Sin img</div>
-                      )}
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <h4 className="font-bold text-sm truncate">{item.product.name}</h4>
-                      <p className="text-sm" style={{ color: bgColor }}>${item.product.salePrice.toLocaleString('es-CO')}</p>
-                      <div className="flex items-center gap-2 mt-1">
-                        <button onClick={() => updateQty(item.product.id, -1)} className="p-1 rounded bg-gray-200 dark:bg-gray-600">
-                          <Minus size={14} />
-                        </button>
-                        <span className="font-bold w-6 text-center">{item.qty}</span>
-                        <button onClick={() => updateQty(item.product.id, 1)} className="p-1 rounded bg-gray-200 dark:bg-gray-600">
-                          <Plus size={14} />
-                        </button>
-                        <button onClick={() => removeFromCart(item.product.id)} className="p-1 rounded text-red-500 ml-auto">
-                          <Trash2 size={14} />
-                        </button>
+                Object.keys(groupedCart).map((storeId) => {
+                  const group = groupedCart[storeId];
+                  const storeSubtotal = group.items.reduce((sum, item) => sum + item.product.salePrice * item.qty, 0);
+                  const storeFee = getStoreDeliveryFee(storeSubtotal);
+                  return (
+                    <div key={storeId} className="space-y-3 border-b border-gray-150/40 dark:border-gray-700/60 pb-5 last:border-b-0">
+                      <div className="flex items-center justify-between bg-gray-50 dark:bg-gray-750 px-3 py-2 rounded-xl">
+                        <span className="font-extrabold text-sm text-orange-600 dark:text-orange-400">{group.store.name}</span>
+                        <span className="text-xs text-gray-400">Envío: ${storeFee.toLocaleString('es-CO')}</span>
+                      </div>
+                      
+                      <div className="space-y-3">
+                        {group.items.map((item) => (
+                          <div key={item.product.id} className="flex gap-3 bg-gray-50/50 dark:bg-gray-750/50 border border-gray-100 dark:border-gray-700/60 rounded-xl p-3">
+                            <div className="w-14 h-14 rounded-lg bg-gray-200 dark:bg-gray-600 relative overflow-hidden flex-shrink-0 border border-gray-100 dark:border-gray-700">
+                              {item.product.photoUrl ? (
+                                <img src={item.product.photoUrl} alt={item.product.name} className="w-full h-full object-cover" />
+                              ) : (
+                                <div className="w-full h-full flex items-center justify-center text-xs text-gray-400">Sin img</div>
+                              )}
+                            </div>
+                            <div className="flex-grow min-w-0">
+                              <h4 className="font-bold text-sm truncate text-gray-900 dark:text-white">{item.product.name}</h4>
+                              <p className="text-sm font-semibold text-gray-500 mt-0.5">${item.product.salePrice.toLocaleString('es-CO')}</p>
+                              <div className="flex items-center gap-2 mt-2">
+                                <button onClick={() => updateQty(item.product.id, -1)} className="p-1 rounded bg-gray-250 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 transition">
+                                  <Minus size={12} />
+                                </button>
+                                <span className="font-extrabold w-6 text-center text-sm">{item.qty}</span>
+                                <button onClick={() => updateQty(item.product.id, 1)} className="p-1 rounded bg-gray-250 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 transition">
+                                  <Plus size={12} />
+                                </button>
+                                <button onClick={() => removeFromCart(item.product.id)} className="p-1 rounded text-red-500 hover:bg-red-50 dark:hover:bg-red-950/20 ml-auto transition">
+                                  <Trash2 size={13} />
+                                </button>
+                              </div>
+                            </div>
+                          </div>
+                        ))}
                       </div>
                     </div>
-                  </div>
-                ))
+                  );
+                })
               )}
             </div>
 
             {cart.length > 0 && (
-              <div className="p-4 border-t dark:border-gray-700 space-y-3">
-                <div className="flex justify-between text-sm">
-                  <span>Subtotal</span>
-                  <span className="font-bold">${cartTotal.toLocaleString('es-CO')}</span>
+              <div className="p-4 border-t border-gray-100 dark:border-gray-700 bg-gray-50/50 dark:bg-gray-750/30 space-y-4">
+                <div className="space-y-1.5 text-sm text-gray-500">
+                  <div className="flex justify-between">
+                    <span>Subtotal productos</span>
+                    <span className="font-bold text-gray-800 dark:text-gray-200">${cartTotal.toLocaleString('es-CO')}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span>Domicilio consolidado</span>
+                    <span className="font-bold text-gray-800 dark:text-gray-200">${totalDeliveryFee.toLocaleString('es-CO')}</span>
+                  </div>
                 </div>
-                <div className="flex justify-between text-lg font-bold">
-                  <span>Total</span>
-                  <span style={{ color: bgColor }}>${cartTotal.toLocaleString('es-CO')}</span>
+                <div className="flex justify-between text-lg font-black border-t border-gray-200 dark:border-gray-700 pt-3">
+                  <span>Total estimado</span>
+                  <span style={{ color: bgColor }}>${grandTotal.toLocaleString('es-CO')}</span>
                 </div>
                 <button
                   onClick={() => { setShowCart(false); setShowCheckout(true); }}
-                  className="w-full py-3 text-white rounded-xl font-bold hover:opacity-90 transition"
+                  className="w-full py-3.5 text-white rounded-xl font-bold hover:opacity-95 transition shadow-md"
                   style={{ backgroundColor: bgColor }}
                 >
-                  Continuar →
+                  Continuar al pago →
                 </button>
               </div>
             )}
@@ -446,114 +746,140 @@ export default function LandingPage() {
       {/* Checkout Modal */}
       {showCheckout && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-          <div className="absolute inset-0 bg-black/50" onClick={() => setShowCheckout(false)} />
-          <div className="relative w-full max-w-lg bg-white dark:bg-gray-800 rounded-2xl shadow-2xl max-h-[90vh] overflow-y-auto">
-            <div className="p-4 border-b dark:border-gray-700 flex items-center justify-between">
+          <div className="absolute inset-0 bg-black/60 backdrop-blur-xs" onClick={() => setShowCheckout(false)} />
+          <div className="relative w-full max-w-lg bg-white dark:bg-gray-800 rounded-3xl shadow-2xl max-h-[90vh] overflow-y-auto">
+            <div className="p-5 border-b border-gray-100 dark:border-gray-700 flex items-center justify-between">
               <h2 className="text-lg font-bold">Completa tu pedido</h2>
-              <button onClick={() => setShowCheckout(false)} className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg">
+              <button onClick={() => setShowCheckout(false)} className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition">
                 <X size={20} />
               </button>
             </div>
 
-            <div className="p-4 space-y-4">
+            <div className="p-5 space-y-5">
               {/* Order summary */}
-              <div className="bg-gray-50 dark:bg-gray-700 rounded-xl p-3 space-y-2">
-                <h3 className="font-bold text-sm">Resumen</h3>
-                {cart.map((item) => (
-                  <div key={item.product.id} className="flex justify-between text-sm">
-                    <span>{item.qty}x {item.product.name}</span>
-                    <span>${(item.product.salePrice * item.qty).toLocaleString('es-CO')}</span>
+              <div className="bg-gray-50 dark:bg-gray-750 border border-gray-100 dark:border-gray-700/60 rounded-2xl p-4 space-y-3">
+                <h3 className="font-extrabold text-sm text-gray-600 dark:text-gray-400">Resumen de Compra</h3>
+                
+                {storeTotals.map((st) => (
+                  <div key={st.storeId} className="flex justify-between text-xs font-semibold pb-1.5 border-b border-gray-200/40 dark:border-gray-700 last:border-b-0 last:pb-0">
+                    <div className="space-y-0.5">
+                      <p className="text-gray-900 dark:text-white">{st.storeName}</p>
+                      <p className="text-gray-400 font-medium text-[10px]">Envío: ${st.deliveryFee.toLocaleString('es-CO')}</p>
+                    </div>
+                    <span className="text-gray-700 dark:text-gray-300">${st.total.toLocaleString('es-CO')}</span>
                   </div>
                 ))}
-                <div className="border-t dark:border-gray-600 pt-2 flex justify-between font-bold">
-                  <span>Subtotal</span>
-                  <span>${cartTotal.toLocaleString('es-CO')}</span>
+
+                <div className="border-t border-gray-200 dark:border-gray-700 pt-3 flex justify-between font-black text-base">
+                  <span>Total Consolidado</span>
+                  <span style={{ color: bgColor }}>${grandTotal.toLocaleString('es-CO')}</span>
                 </div>
               </div>
 
               {/* Customer form */}
-              <div className="space-y-3">
-                <h3 className="font-bold text-sm">Tus datos</h3>
+              <div className="space-y-4">
+                <h3 className="font-extrabold text-sm text-gray-600 dark:text-gray-400">Tus datos de entrega</h3>
                 <input
                   type="text"
                   placeholder="Nombre completo"
                   value={customerData.name}
                   onChange={(e) => setCustomerData({ ...customerData, name: e.target.value })}
-                  className="w-full px-4 py-3 rounded-xl border border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 outline-none focus:ring-2 focus:ring-orange-400"
+                  className="w-full px-4 py-3 rounded-xl border border-gray-200 dark:border-gray-750 bg-gray-50 dark:bg-gray-750 outline-none focus:ring-2 focus:ring-orange-400 text-sm"
                 />
                 <input
                   type="tel"
-                  placeholder="Teléfono"
+                  placeholder="Teléfono móvil"
                   value={customerData.phone}
                   onChange={(e) => setCustomerData({ ...customerData, phone: e.target.value })}
-                  className="w-full px-4 py-3 rounded-xl border border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 outline-none focus:ring-2 focus:ring-orange-400"
+                  className="w-full px-4 py-3 rounded-xl border border-gray-200 dark:border-gray-750 bg-gray-50 dark:bg-gray-750 outline-none focus:ring-2 focus:ring-orange-400 text-sm"
                 />
                 <input
                   type="text"
-                  placeholder="Dirección completa"
+                  placeholder="Dirección completa de entrega"
                   value={customerData.address}
                   onChange={(e) => setCustomerData({ ...customerData, address: e.target.value })}
-                  className="w-full px-4 py-3 rounded-xl border border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 outline-none focus:ring-2 focus:ring-orange-400"
+                  className="w-full px-4 py-3 rounded-xl border border-gray-200 dark:border-gray-750 bg-gray-50 dark:bg-gray-750 outline-none focus:ring-2 focus:ring-orange-400 text-sm"
                 />
                 <select
                   value={customerData.zone}
                   onChange={(e) => setCustomerData({ ...customerData, zone: e.target.value })}
-                  className="w-full px-4 py-3 rounded-xl border border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 outline-none focus:ring-2 focus:ring-orange-400"
+                  className="w-full px-4 py-3 rounded-xl border border-gray-200 dark:border-gray-750 bg-gray-50 dark:bg-gray-750 outline-none focus:ring-2 focus:ring-orange-400 text-sm"
                 >
                   <option value="">Selecciona zona de domicilio</option>
                   {deliveryZones.map((zone) => (
                     <option key={zone.id} value={zone.id}>
-                      {zone.name}
+                      {zone.name} (${zone.fee.toLocaleString('es-CO')})
                     </option>
                   ))}
                 </select>
-                {(() => {
-                  const zone = deliveryZones.find((z) => z.id === customerData.zone);
-                  if (!zone) return null;
-                  const zoneNameClean = zone.name.toLowerCase().trim();
-                  if (zoneNameClean.includes('puerto colombia') || zoneNameClean.includes('puerto col') || zoneNameClean.includes('pradomar')) {
-                    return (
-                      <p className="text-xs text-orange-600 dark:text-orange-400 font-medium mt-1">
-                        Por la compra de más de $10.000 pesos no se cobra domicilio
-                      </p>
-                    );
-                  } else if (zoneNameClean.includes('salgar')) {
-                    return (
-                      <p className="text-xs text-orange-600 dark:text-orange-400 font-medium mt-1">
-                        Por la compra de $18.000 pesos o más no se cobra domicilio
-                      </p>
-                    );
-                  }
-                  return null;
-                })()}
-              </div>
 
-              {/* Total with delivery */}
-              {customerData.zone && (
-                <div className="bg-gray-50 dark:bg-gray-700 rounded-xl p-3 space-y-2">
-                  <div className="flex justify-between text-sm">
-                    <span>Subtotal productos</span>
-                    <span>${cartTotal.toLocaleString('es-CO')}</span>
+                {customerData.zone && (
+                  <div className="bg-orange-50 dark:bg-orange-950/20 border border-orange-100 dark:border-orange-900/40 rounded-xl p-3 text-xs text-orange-600 dark:text-orange-400 font-medium space-y-1">
+                    <p>ℹ️ Políticas de Domicilio Gratuito por tienda:</p>
+                    <ul className="list-disc pl-4 space-y-0.5">
+                      <li>Puerto Colombia / Pradomar: Gratis por compras mayores a $10.000 COP en la respectiva tienda.</li>
+                      <li>Salgar: Gratis por compras mayores a $18.000 COP en la respectiva tienda.</li>
+                    </ul>
                   </div>
-                  <div className="flex justify-between text-sm">
-                    <span>Domicilio</span>
-                    <span>${deliveryFee.toLocaleString('es-CO')}</span>
-                  </div>
-                  <div className="border-t dark:border-gray-600 pt-2 flex justify-between text-lg font-bold">
-                    <span>Total a pagar</span>
-                    <span style={{ color: bgColor }}>${total.toLocaleString('es-CO')}</span>
-                  </div>
-                </div>
-              )}
+                )}
+              </div>
 
               <button
                 onClick={handleCheckout}
-                className="w-full py-3 text-white rounded-xl font-bold hover:opacity-90 transition"
+                className="w-full py-4 text-white rounded-2xl font-bold hover:opacity-95 transition shadow-md mt-4 text-sm"
                 style={{ backgroundColor: bgColor }}
               >
-                Confirmar Pedido
+                Confirmar y generar pedidos
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Checkout Success WhatsApp Drawer/Modal */}
+      {checkoutSuccessOrders.length > 0 && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
+          <div className="relative w-full max-w-md bg-white dark:bg-gray-800 rounded-3xl p-6 shadow-2xl text-center space-y-6">
+            <div className="w-16 h-16 bg-green-100 dark:bg-green-950/30 rounded-full flex items-center justify-center mx-auto text-green-500 animate-bounce">
+              <CheckCircle size={36} />
+            </div>
+            <div>
+              <h2 className="text-2xl font-black text-gray-900 dark:text-white">¡Pedidos Creados!</h2>
+              <p className="text-gray-500 dark:text-gray-400 mt-2 text-sm">
+                Hemos dividido tus compras por tienda. Para confirmar cada pedido, haz clic en el botón de WhatsApp correspondiente. Esto enviará los detalles de compra a cada comerciante.
+              </p>
+            </div>
+            <div className="space-y-3 max-h-56 overflow-y-auto p-1">
+              {checkoutSuccessOrders.map((ord, idx) => (
+                <div key={idx} className="p-4 bg-gray-50 dark:bg-gray-750 border border-gray-100 dark:border-gray-700/60 rounded-2xl flex flex-col items-center justify-between gap-3 shadow-xs">
+                  <div className="text-center">
+                    <p className="font-extrabold text-sm text-gray-850 dark:text-gray-200">{ord.storeName}</p>
+                    <p className="text-xs text-gray-400 mt-0.5">Seguimiento: {ord.trackingCode}</p>
+                  </div>
+                  <a
+                    href={ord.whatsappUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="w-full py-2.5 px-4 bg-green-500 hover:bg-green-600 text-white rounded-xl font-bold text-sm flex items-center justify-center gap-2 shadow-sm transition"
+                  >
+                    <Phone size={16} /> Enviar WhatsApp
+                  </a>
+                </div>
+              ))}
+            </div>
+            <button
+              onClick={() => {
+                setCheckoutSuccessOrders([]);
+                setCart([]);
+                setShowCheckout(false);
+                setShowCart(false);
+                setCustomerData({ name: '', phone: '', address: '', zone: '' });
+                setSelectedStore(null);
+              }}
+              className="w-full py-3 bg-gray-900 dark:bg-gray-100 dark:text-gray-900 text-white rounded-2xl font-extrabold transition text-sm hover:opacity-90 shadow-sm"
+            >
+              Cerrar y volver al Marketplace
+            </button>
           </div>
         </div>
       )}

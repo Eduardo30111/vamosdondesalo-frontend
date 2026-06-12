@@ -21,6 +21,7 @@ import { UploadModule } from './upload/upload.module';
 import { HealthModule } from './health/health.module';
 import { ProductionOrdersModule } from './production-orders/production-orders.module';
 import { PreparedAuthorizationsModule } from './prepared-authorizations/prepared-authorizations.module';
+import { StoresModule } from './stores/stores.module';
 
 @Module({
   imports: [
@@ -45,6 +46,7 @@ import { PreparedAuthorizationsModule } from './prepared-authorizations/prepared
     UploadModule,
     HealthModule,
     ProductionOrdersModule,
+    StoresModule,
   ],
 })
 export class AppModule {}

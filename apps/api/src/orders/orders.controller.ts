@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Put, Body, Param, Query, UseGuards } from '@nestjs/common';
+import { Controller, Get, Post, Put, Body, Param, Query, UseGuards, Request } from '@nestjs/common';
 import { OrdersService } from './orders.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
@@ -10,6 +10,30 @@ import { UpdateOrderStatusDto } from './dto/update-order-status.dto';
 @UseGuards(JwtAuthGuard, RolesGuard)
 export class OrdersController {
   constructor(private ordersService: OrdersService) {}
+
+  @Get('store')
+  @Roles('ADMIN', 'MERCHANT')
+  findStoreOrders(@Request() req: any, @Query('status') status?: string) {
+    return this.ordersService.findStoreOrdersByOwner(req.user.id, status);
+  }
+
+  @Get('store/active')
+  @Roles('ADMIN', 'MERCHANT')
+  findStoreActive(@Request() req: any) {
+    return this.ordersService.findStoreActiveByOwner(req.user.id);
+  }
+
+  @Get('store/cocina')
+  @Roles('ADMIN', 'MERCHANT')
+  findStoreCocina(@Request() req: any) {
+    return this.ordersService.findStoreCocinaByOwner(req.user.id);
+  }
+
+  @Get('store/deliveries')
+  @Roles('ADMIN', 'MERCHANT')
+  findStoreDeliveries(@Request() req: any) {
+    return this.ordersService.findStoreDeliveriesByOwner(req.user.id);
+  }
 
   @Get()
   @Roles('ADMIN', 'VENDEDOR', 'COCINA')

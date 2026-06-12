@@ -39,4 +39,7 @@ export class UpdateProductDto {
   @Min(0)
   @IsOptional()
   dailyStock?: number;
+
+  @IsOptional()
+  active?: boolean;
 }
