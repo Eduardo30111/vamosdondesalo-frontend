@@ -6,6 +6,8 @@ import { toast } from 'sonner';
 import { api } from '@/lib/api';
 import { useAuthStore } from '@/store/auth';
 
+import { ArrowLeft } from 'lucide-react';
+
 export default function LoginPage() {
   const router = useRouter();
   const { setAuth } = useAuthStore();
@@ -60,7 +62,14 @@ export default function LoginPage() {
     <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-salo-cream to-primary-100 dark:from-gray-900 dark:to-gray-800 p-4">
       <div className="w-full max-w-md">
         <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-xl p-8">
-          <div className="text-center mb-8">
+          <div className="text-center mb-8 relative">
+            <button
+              onClick={() => router.push('/')}
+              className="absolute left-0 top-0 p-2 text-gray-400 hover:text-salo-orange dark:hover:text-salo-orange transition-colors rounded-xl bg-gray-50 dark:bg-gray-700/50 hover:bg-gray-100 dark:hover:bg-gray-700"
+              title="Volver al inicio"
+            >
+              <ArrowLeft size={18} />
+            </button>
             <img
               src="/logo.jpg"
               alt="Logo Vamos Donde Salo"
