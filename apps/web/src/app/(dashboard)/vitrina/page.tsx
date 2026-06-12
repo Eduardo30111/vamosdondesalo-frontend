@@ -57,18 +57,30 @@ interface Product {
 }
 
 const getOrderTotalLocal = (item: OfflineQueueItem) => {
+  if (typeof window === 'undefined') return 0;
   const cachedProducts = JSON.parse(localStorage.getItem('salo_cached_products') || '[]');
-  return item.orderData.items.reduce((sum: number, it: any) => {
+  return (item?.orderData?.items || []).reduce((sum: number, it: any) => {
     const product = cachedProducts.find((p: any) => p.id === it.productId);
     return sum + (product?.salePrice || 0) * it.qty;
   }, 0);
 };
 
 const queueItemToOrder = (item: OfflineQueueItem): Order => {
+  if (typeof window === 'undefined') {
+    return {
+      id: item?.id || '',
+      customerName: item?.orderData?.customerName || 'Cliente',
+      status: 'PENDIENTE',
+      type: item?.orderData?.type || 'TAKEAWAY',
+      total: 0,
+      createdAt: item?.createdAt || new Date().toISOString(),
+      items: [],
+    };
+  }
   const cachedProducts = JSON.parse(localStorage.getItem('salo_cached_products') || '[]');
   const cachedTables = JSON.parse(localStorage.getItem('salo_cached_tables') || '[]');
   
-  const items: OrderItem[] = item.orderData.items.map((i, index) => {
+  const items: OrderItem[] = (item?.orderData?.items || []).map((i, index) => {
     const product = cachedProducts.find((p: any) => p.id === i.productId);
     return {
       id: `${item.id}-item-${index}`,
@@ -83,15 +95,15 @@ const queueItemToOrder = (item: OfflineQueueItem): Order => {
   });
 
   const total = items.reduce((sum, it) => sum + it.unitPrice * it.qty, 0);
-  const tableObj = cachedTables.find((t: any) => t.id === item.orderData.tableId);
+  const tableObj = cachedTables.find((t: any) => t.id === item?.orderData?.tableId);
 
   return {
-    id: item.id,
-    customerName: item.orderData.customerName,
+    id: item?.id || '',
+    customerName: item?.orderData?.customerName || 'Cliente',
     status: 'PENDIENTE',
-    type: item.orderData.type,
+    type: item?.orderData?.type || 'TAKEAWAY',
     total: total,
-    createdAt: item.createdAt,
+    createdAt: item?.createdAt || new Date().toISOString(),
     items: items,
     table: tableObj ? { number: tableObj.number } : undefined
   };
@@ -230,7 +242,7 @@ export default function VitrinaPage() {
   const pagar = async (id: string) => {
     if (!confirm('¿Cobrar este pedido en efectivo?')) return;
     
-    if (id.startsWith('local-')) {
+    if (id && id.startsWith && id.startsWith('local-')) {
       const queue = getOfflineQueue();
       const itemIndex = queue.findIndex((it) => it.id === id);
       if (itemIndex > -1) {
@@ -261,13 +273,13 @@ export default function VitrinaPage() {
   const cancelar = async (id: string) => {
     if (!confirm('¿Cancelar este pedido? El stock de vitrina se devolverá.')) return;
     
-    if (id.startsWith('local-')) {
+    if (id && id.startsWith && id.startsWith('local-')) {
       const queue = getOfflineQueue();
       const item = queue.find((it) => it.id === id);
       if (item) {
         // Restore stock
         const cachedProducts = JSON.parse(localStorage.getItem('salo_cached_products') || '[]');
-        item.orderData.items.forEach((it: any) => {
+        (item?.orderData?.items || []).forEach((it: any) => {
           const product = cachedProducts.find((p: any) => p.id === it.productId);
           if (product && product.preparationMode === 'VITRINA') {
             if (!product.vitrinaStock) product.vitrinaStock = { qty: 0 };
@@ -315,7 +327,7 @@ export default function VitrinaPage() {
   const fiar = async () => {
     if (!fiarOrderId) return;
     
-    if (fiarOrderId.startsWith('local-')) {
+    if (fiarOrderId && fiarOrderId.startsWith && fiarOrderId.startsWith('local-')) {
       const queue = getOfflineQueue();
       const itemIndex = queue.findIndex((it) => it.id === fiarOrderId);
       if (itemIndex > -1) {
@@ -395,7 +407,7 @@ export default function VitrinaPage() {
   const confirmarAgregarItems = async () => {
     if (!editOrder || newItems.length === 0) return;
     
-    if (editOrder.id.startsWith('local-')) {
+    if (editOrder.id && editOrder.id.startsWith && editOrder.id.startsWith('local-')) {
       const queue = getOfflineQueue();
       const itemIndex = queue.findIndex((it) => it.id === editOrder.id);
       if (itemIndex > -1) {
@@ -469,7 +481,7 @@ export default function VitrinaPage() {
   const confirmarNequi = async () => {
     if (!nequiOrderId || nequiAmountNum <= 0) return;
     
-    if (nequiOrderId.startsWith('local-')) {
+    if (nequiOrderId && nequiOrderId.startsWith && nequiOrderId.startsWith('local-')) {
       const queue = getOfflineQueue();
       const itemIndex = queue.findIndex((it) => it.id === nequiOrderId);
       if (itemIndex > -1) {
@@ -807,7 +819,7 @@ export default function VitrinaPage() {
                     <div>
                       <p className="font-bold flex items-center gap-1.5">
                         {o.customerName}
-                        {o.id.startsWith('local-') && (
+                        {o.id && o.id.startsWith && o.id.startsWith('local-') && (
                           <span className="text-[10px] bg-orange-100 text-orange-700 px-1.5 py-0.5 rounded-full font-semibold">Local (Sin sincronizar)</span>
                         )}
                       </p>
