@@ -6,6 +6,7 @@ import { api } from '@/lib/api';
 import { useCartStore } from '@/store/cart';
 import { cn, formatCurrency } from '@/lib/utils';
 import { getSocket, joinRoom } from '@/lib/socket';
+import { getOfflineQueue, addToOfflineQueue, syncOfflineQueue, isNetworkError } from '@/lib/offline-queue';
 import {
   ShoppingCart,
   Plus,
@@ -79,26 +80,95 @@ export default function POSPage() {
   const [productionQty, setProductionQty] = useState('');
   const [productionLoading, setProductionLoading] = useState(false);
 
+  // Offline states
+  const [isOnline, setIsOnline] = useState(true);
+  const [offlineCount, setOfflineCount] = useState(0);
+  const [syncing, setSyncing] = useState(false);
+
+  const handleSyncQueue = async () => {
+    if (syncing) return;
+    setSyncing(true);
+    try {
+      const result = await syncOfflineQueue((msg) => {
+        toast.info(msg);
+      });
+      if (result.success > 0) {
+        toast.success(`${result.success} pedido(s) local(es) sincronizado(s) exitosamente`);
+        loadData();
+      } else if (result.failed > 0) {
+        toast.error('Ocurrieron errores al sincronizar algunos pedidos locales');
+      } else {
+        toast.info('No hay pedidos locales pendientes por sincronizar');
+      }
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setOfflineCount(getOfflineQueue().length);
+      setSyncing(false);
+    }
+  };
+
   useEffect(() => {
     loadData();
-    const socket = getSocket();
-    joinRoom('pos');
+    
+    if (typeof window !== 'undefined') {
+      setIsOnline(navigator.onLine);
+      setOfflineCount(getOfflineQueue().length);
 
-    const handleOrderStatusChanged = () => {
-      toast.info('Estado de pedido actualizado');
-    };
+      const handleOnline = () => {
+        setIsOnline(true);
+        syncOfflineQueue().then((result) => {
+          if (result.success > 0) {
+            toast.success(`${result.success} pedido(s) local(es) sincronizado(s) automáticamente`);
+            setOfflineCount(getOfflineQueue().length);
+            loadData();
+          }
+        });
+      };
+      
+      const handleOffline = () => {
+        setIsOnline(false);
+      };
 
-    const handleVitrinaUpdated = () => {
-      loadData();
-    };
+      window.addEventListener('online', handleOnline);
+      window.addEventListener('offline', handleOffline);
 
-    socket.on('order:status_changed', handleOrderStatusChanged);
-    socket.on('vitrina:updated', handleVitrinaUpdated);
+      const syncInterval = setInterval(async () => {
+        if (navigator.onLine) {
+          const queue = getOfflineQueue();
+          if (queue.length > 0) {
+            const result = await syncOfflineQueue();
+            if (result.success > 0) {
+              toast.success(`${result.success} pedido(s) local(es) sincronizado(s) automáticamente`);
+              setOfflineCount(getOfflineQueue().length);
+              loadData();
+            }
+          }
+        }
+      }, 20000);
 
-    return () => {
-      socket.off('order:status_changed', handleOrderStatusChanged);
-      socket.off('vitrina:updated', handleVitrinaUpdated);
-    };
+      const socket = getSocket();
+      joinRoom('pos');
+
+      const handleOrderStatusChanged = () => {
+        toast.info('Estado de pedido actualizado');
+      };
+
+      const handleVitrinaUpdated = () => {
+        loadData();
+      };
+
+      socket.on('order:status_changed', handleOrderStatusChanged);
+      socket.on('vitrina:updated', handleVitrinaUpdated);
+
+      return () => {
+        window.removeEventListener('online', handleOnline);
+        window.removeEventListener('offline', handleOffline);
+        clearInterval(syncInterval);
+        socket.off('order:status_changed', handleOrderStatusChanged);
+        socket.off('vitrina:updated', handleVitrinaUpdated);
+      };
+    }
   }, []);
 
   const loadData = async () => {
@@ -109,12 +179,31 @@ export default function POSPage() {
         api.get<PaymentMethodConfig[]>('/payments/methods'),
         api.get<DeliveryZone[]>('/delivery-zones/enabled'),
       ]);
+      
+      localStorage.setItem('salo_cached_products', JSON.stringify(prods));
+      localStorage.setItem('salo_cached_tables', JSON.stringify(tbls));
+      localStorage.setItem('salo_cached_payment_methods', JSON.stringify(methods));
+      localStorage.setItem('salo_cached_delivery_zones', JSON.stringify(zones));
+
       setProducts(prods);
       setTables(tbls);
       setPaymentMethods(methods.filter((m) => m.enabled));
       setDeliveryZones(zones);
     } catch (err: unknown) {
-      toast.error(err instanceof Error ? err.message : 'Error cargando datos');
+      const cachedProds = localStorage.getItem('salo_cached_products');
+      const cachedTables = localStorage.getItem('salo_cached_tables');
+      const cachedMethods = localStorage.getItem('salo_cached_payment_methods');
+      const cachedZones = localStorage.getItem('salo_cached_delivery_zones');
+
+      if (cachedProds && cachedTables && cachedMethods && cachedZones) {
+        setProducts(JSON.parse(cachedProds));
+        setTables(JSON.parse(cachedTables));
+        setPaymentMethods(JSON.parse(cachedMethods).filter((m: any) => m.enabled));
+        setDeliveryZones(JSON.parse(cachedZones));
+        toast.warning('Sin conexión. Usando datos guardados localmente.');
+      } else {
+        toast.error('Error cargando datos y no hay copia local guardada.');
+      }
     } finally {
       setLoading(false);
     }
@@ -128,7 +217,7 @@ export default function POSPage() {
 
   const getTotal = () => cart.total() + getDeliveryFee();
 
-  const handleCreateOrder = async (): Promise<{ id: string; total: number } | null> => {
+  const handleCreateOrder = async (paymentMethodForOffline?: string): Promise<{ id: string; total: number } | null> => {
     if (cart.items.length === 0) {
       toast.error('Agrega productos al pedido');
       return null;
@@ -157,27 +246,80 @@ export default function POSPage() {
       return null;
     }
 
+    const orderData = {
+      type: cart.orderType,
+      tableId: cart.tableId,
+      customerName: cart.customerName,
+      customerPhone: cart.orderType === 'DELIVERY' ? customerPhone : undefined,
+      customerAddress: cart.orderType === 'DELIVERY' ? customerAddress : undefined,
+      deliveryZoneId: cart.orderType === 'DELIVERY' ? selectedZone : undefined,
+      notes: cart.notes,
+      items: cart.items.map((i) => ({
+        productId: i.productId,
+        qty: i.qty,
+        notes: i.notes || undefined,
+      })),
+    };
+
+    if (!navigator.onLine) {
+      const tempId = 'local-' + Date.now();
+      const total = getTotal();
+      if (paymentMethodForOffline) {
+        addToOfflineQueue({
+          type: 'PAID',
+          orderData,
+          paymentData: {
+            method: paymentMethodForOffline,
+            amount: total,
+          },
+        });
+      } else {
+        addToOfflineQueue({
+          type: 'STANDARD',
+          orderData,
+        });
+      }
+      setOfflineCount(getOfflineQueue().length);
+      toast.warning('Sin conexión. Pedido guardado localmente en cola.');
+      setShowPayment(false);
+      resetDeliveryFields();
+      cart.clear();
+      return { id: tempId, total };
+    }
+
     try {
-      const order = await api.post<{ id: string; total: number }>('/orders', {
-        type: cart.orderType,
-        tableId: cart.tableId,
-        customerName: cart.customerName,
-        customerPhone: cart.orderType === 'DELIVERY' ? customerPhone : undefined,
-        customerAddress: cart.orderType === 'DELIVERY' ? customerAddress : undefined,
-        deliveryZoneId: cart.orderType === 'DELIVERY' ? selectedZone : undefined,
-        notes: cart.notes,
-        items: cart.items.map((i) => ({
-          productId: i.productId,
-          qty: i.qty,
-          notes: i.notes || undefined,
-        })),
-      });
+      const order = await api.post<{ id: string; total: number }>('/orders', orderData);
       toast.success('Pedido creado exitosamente!');
       setShowPayment(false);
       resetDeliveryFields();
       cart.clear();
       return order;
     } catch (err: unknown) {
+      if (err instanceof Error && isNetworkError(err)) {
+        const tempId = 'local-' + Date.now();
+        const total = getTotal();
+        if (paymentMethodForOffline) {
+          addToOfflineQueue({
+            type: 'PAID',
+            orderData,
+            paymentData: {
+              method: paymentMethodForOffline,
+              amount: total,
+            },
+          });
+        } else {
+          addToOfflineQueue({
+            type: 'STANDARD',
+            orderData,
+          });
+        }
+        setOfflineCount(getOfflineQueue().length);
+        toast.warning('Error de red. Pedido guardado localmente para reintentar.');
+        setShowPayment(false);
+        resetDeliveryFields();
+        cart.clear();
+        return { id: tempId, total };
+      }
       toast.error(err instanceof Error ? err.message : 'Error creando pedido');
       return null;
     }
@@ -188,8 +330,8 @@ export default function POSPage() {
       toast.error('Selecciona un método de pago');
       return;
     }
-    const order = await handleCreateOrder();
-    if (order) {
+    const order = await handleCreateOrder(selectedMethod);
+    if (order && !order.id.startsWith('local-')) {
       try {
         await api.post('/payments', {
           orderId: order.id,
@@ -237,6 +379,45 @@ export default function POSPage() {
       return;
     }
 
+    const orderData = {
+      type: cart.orderType,
+      tableId: cart.tableId,
+      customerName: fiarName || existingCustomer?.name || 'Cliente de Fiado',
+      customerPhone: cart.orderType === 'DELIVERY' ? customerPhone : undefined,
+      customerAddress: cart.orderType === 'DELIVERY' ? customerAddress : undefined,
+      deliveryZoneId: cart.orderType === 'DELIVERY' ? selectedZone : undefined,
+      notes: cart.notes,
+      items: cart.items.map((i) => ({
+        productId: i.productId,
+        qty: i.qty,
+        notes: i.notes || undefined,
+      })),
+    };
+
+    const customerData = {
+      cedula: fiarCedula,
+      name: fiarName || undefined,
+      phone: fiarPhone || undefined,
+    };
+
+    if (!navigator.onLine) {
+      addToOfflineQueue({
+        type: 'FIADO',
+        orderData,
+        customerData,
+      });
+      setOfflineCount(getOfflineQueue().length);
+      toast.warning('Sin conexión. Fiado guardado localmente en la cola.');
+      setShowFiar(false);
+      setFiarCedula('');
+      setFiarName('');
+      setFiarPhone('');
+      setExistingCustomer(null);
+      resetDeliveryFields();
+      cart.clear();
+      return;
+    }
+
     try {
       // Create or find customer
       const customer = await api.post<{ id: string; name: string }>('/customers', {
@@ -247,18 +428,8 @@ export default function POSPage() {
 
       // Create the order
       const order = await api.post<{ id: string; total: number }>('/orders', {
-        type: cart.orderType,
-        tableId: cart.tableId,
+        ...orderData,
         customerName: customer.name,
-        customerPhone: cart.orderType === 'DELIVERY' ? customerPhone : undefined,
-        customerAddress: cart.orderType === 'DELIVERY' ? customerAddress : undefined,
-        deliveryZoneId: cart.orderType === 'DELIVERY' ? selectedZone : undefined,
-        notes: cart.notes,
-        items: cart.items.map((i) => ({
-          productId: i.productId,
-          qty: i.qty,
-          notes: i.notes || undefined,
-        })),
       });
 
       // Charge the customer
@@ -280,6 +451,23 @@ export default function POSPage() {
       resetDeliveryFields();
       cart.clear();
     } catch (err: unknown) {
+      if (err instanceof Error && isNetworkError(err)) {
+        addToOfflineQueue({
+          type: 'FIADO',
+          orderData,
+          customerData,
+        });
+        setOfflineCount(getOfflineQueue().length);
+        toast.warning('Error de red. Fiado guardado localmente para reintentar.');
+        setShowFiar(false);
+        setFiarCedula('');
+        setFiarName('');
+        setFiarPhone('');
+        setExistingCustomer(null);
+        resetDeliveryFields();
+        cart.clear();
+        return;
+      }
       toast.error(err instanceof Error ? err.message : 'Error registrando fiado');
     }
   };
@@ -330,7 +518,29 @@ export default function POSPage() {
       {/* Products Grid */}
       <div className="flex-1 flex flex-col min-h-0">
         <div className="mb-4">
-          <h1 className="text-2xl font-bold mb-3">Punto de Venta</h1>
+          <div className="flex items-center justify-between mb-3">
+            <h1 className="text-2xl font-bold">Punto de Venta</h1>
+            <div className="flex items-center gap-2">
+              <span className={`flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold ${
+                isOnline 
+                  ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400' 
+                  : 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400'
+              }`}>
+                <span className={`w-2 h-2 rounded-full ${isOnline ? 'bg-green-500' : 'bg-red-500 animate-pulse'}`} />
+                {isOnline ? 'En línea' : 'Sin conexión'}
+              </span>
+
+              {offlineCount > 0 && (
+                <button
+                  onClick={handleSyncQueue}
+                  disabled={syncing || !isOnline}
+                  className="flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400 hover:bg-orange-200 dark:hover:bg-orange-900/50 transition cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  <span>🔄 {offlineCount} pendiente{offlineCount > 1 ? 's' : ''}</span>
+                </button>
+              )}
+            </div>
+          </div>
           <input
             type="text"
             placeholder="Buscar producto..."
@@ -597,7 +807,7 @@ export default function POSPage() {
 
             <div className="grid grid-cols-3 gap-2">
               <button
-                onClick={handleCreateOrder}
+                onClick={() => handleCreateOrder()}
                 disabled={cart.items.length === 0}
                 className="py-3 rounded-xl bg-salo-orange text-white font-semibold text-sm hover:bg-primary-700 transition disabled:opacity-50 disabled:cursor-not-allowed"
               >
