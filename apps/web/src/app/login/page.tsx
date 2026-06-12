@@ -61,9 +61,11 @@ export default function LoginPage() {
       <div className="w-full max-w-md">
         <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-xl p-8">
           <div className="text-center mb-8">
-            <div className="w-20 h-20 bg-salo-orange rounded-2xl flex items-center justify-center mx-auto mb-4">
-              <span className="text-white text-3xl font-bold">S</span>
-            </div>
+            <img
+              src="/logo.jpg"
+              alt="Logo Vamos Donde Salo"
+              className="w-20 h-20 rounded-2xl object-cover mx-auto mb-4 border-2 border-salo-orange shadow-md"
+            />
             <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Vamos Donde Salo!</h1>
             <p className="text-gray-500 dark:text-gray-400 mt-1">Sistema POS</p>
           </div>

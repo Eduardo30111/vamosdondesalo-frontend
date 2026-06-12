@@ -88,9 +88,11 @@ export function Sidebar() {
     <>
       <div className="p-4 border-b border-gray-200 dark:border-gray-700">
         <div className="flex items-center gap-3">
-          <div className="w-10 h-10 bg-salo-orange rounded-xl flex items-center justify-center">
-            <span className="text-white font-bold text-lg">S</span>
-          </div>
+          <img
+            src="/logo.jpg"
+            alt="Logo Vamos Donde Salo"
+            className="w-10 h-10 rounded-xl object-cover border border-gray-100 dark:border-gray-700"
+          />
           <div className="flex-1 min-w-0">
             <h2 className="font-bold text-sm truncate">Donde Salo!</h2>
             <p className="text-xs text-gray-500 dark:text-gray-400 truncate">{user?.name}</p>

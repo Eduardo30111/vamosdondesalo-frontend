@@ -204,8 +204,13 @@ export default function LandingPage() {
       {/* Header */}
       <header className="sticky top-0 z-50 bg-white dark:bg-gray-800 shadow-sm border-b dark:border-gray-700">
         <div className="max-w-6xl mx-auto px-4 py-3 flex items-center justify-between">
-          <Link href="/" className="text-xl font-bold" style={{ color: bgColor }}>
-            {config?.business_name || 'Donde Salo!'}
+          <Link href="/" className="flex items-center gap-2.5 text-xl font-bold" style={{ color: bgColor }}>
+            <img
+              src="/logo.jpg"
+              alt="Logo Vamos Donde Salo"
+              className="w-9 h-9 rounded-full object-cover border border-gray-100 dark:border-gray-700 shadow-sm"
+            />
+            <span>{config?.business_name || 'Donde Salo!'}</span>
           </Link>
           <div className="flex items-center gap-3">
             <button
