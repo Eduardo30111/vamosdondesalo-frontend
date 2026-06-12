@@ -54,7 +54,13 @@ export class CustomersController {
   @Post(':id/charge')
   @Roles('ADMIN', 'VENDEDOR')
   charge(@Param('id') id: string, @Body() body: { amount: number; note?: string; createdAt?: string }) {
-    const date = body.createdAt ? new Date(body.createdAt) : undefined;
+    let date: Date | undefined = undefined;
+    if (body.createdAt) {
+      const parsedDate = new Date(body.createdAt);
+      if (!isNaN(parsedDate.getTime())) {
+        date = parsedDate;
+      }
+    }
     return this.service.charge(id, body.amount, body.note, date);
   }
 
