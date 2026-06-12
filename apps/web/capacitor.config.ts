@@ -3,12 +3,7 @@ import type { CapacitorConfig } from '@capacitor/cli';
 const config: CapacitorConfig = {
   appId: 'co.salo.pos',
   appName: 'Vamos Donde Salo!',
-  webDir: 'public-mobile',
-  server: {
-    // Para emulador Android: 10.0.2.2 siempre apunta al host (tu Mac)
-    url: 'https://salo-web.onrender.com',
-    cleartext: true,
-  },
+  webDir: 'out',
   android: {
     allowMixedContent: true,
   },

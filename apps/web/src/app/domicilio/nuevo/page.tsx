@@ -94,7 +94,20 @@ export default function DomicilioPage() {
   const getSubtotal = () => cart.reduce((s, i) => s + i.price * i.qty, 0);
   const getDeliveryFee = () => {
     const zone = zones.find((z) => z.id === selectedZone);
-    return zone?.fee || 0;
+    if (!zone) return 0;
+    const subtotal = getSubtotal();
+    
+    const zoneNameClean = zone.name.toLowerCase().trim();
+    if (zoneNameClean.includes('puerto colombia') || zoneNameClean.includes('puerto col') || zoneNameClean.includes('pradomar')) {
+      if (subtotal > 10000) {
+        return 0;
+      }
+    } else if (zoneNameClean.includes('salgar')) {
+      if (subtotal >= 18000) {
+        return 0;
+      }
+    }
+    return zone.fee;
   };
   const getTotal = () => getSubtotal() + getDeliveryFee();
 
@@ -199,9 +212,28 @@ export default function DomicilioPage() {
             <select value={selectedZone} onChange={(e) => setSelectedZone(e.target.value)} className="w-full px-3 py-2 rounded-lg border border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 text-sm">
               <option value="">Seleccionar zona...</option>
               {zones.map((z) => (
-                <option key={z.id} value={z.id}>{z.name} (+{formatCurrency(z.fee)})</option>
+                <option key={z.id} value={z.id}>{z.name}</option>
               ))}
             </select>
+            {(() => {
+              const zone = zones.find((z) => z.id === selectedZone);
+              if (!zone) return null;
+              const zoneNameClean = zone.name.toLowerCase().trim();
+              if (zoneNameClean.includes('puerto colombia') || zoneNameClean.includes('puerto col') || zoneNameClean.includes('pradomar')) {
+                return (
+                  <p className="text-xs text-orange-600 dark:text-orange-400 font-medium mt-1">
+                    Por la compra de más de $10.000 pesos no se cobra domicilio
+                  </p>
+                );
+              } else if (zoneNameClean.includes('salgar')) {
+                return (
+                  <p className="text-xs text-orange-600 dark:text-orange-400 font-medium mt-1">
+                    Por la compra de $18.000 pesos o más no se cobra domicilio
+                  </p>
+                );
+              }
+              return null;
+            })()}
           </div>
 
           <div className="space-y-2">

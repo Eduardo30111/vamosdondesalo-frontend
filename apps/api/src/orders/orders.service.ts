@@ -139,7 +139,20 @@ export class OrdersService {
     let deliveryFee = 0;
     if (dto.type === 'DELIVERY' && dto.deliveryZoneId) {
       const zone = await this.prisma.deliveryZone.findUnique({ where: { id: dto.deliveryZoneId } });
-      if (zone) deliveryFee = zone.fee;
+      if (zone) {
+        deliveryFee = zone.fee;
+        const subtotal = total; // total is the items subtotal here
+        const zoneNameClean = zone.name.toLowerCase().trim();
+        if (zoneNameClean.includes('puerto colombia') || zoneNameClean.includes('puerto col') || zoneNameClean.includes('pradomar')) {
+          if (subtotal > 10000) {
+            deliveryFee = 0;
+          }
+        } else if (zoneNameClean.includes('salgar')) {
+          if (subtotal >= 18000) {
+            deliveryFee = 0;
+          }
+        }
+      }
     }
 
     total += deliveryFee;

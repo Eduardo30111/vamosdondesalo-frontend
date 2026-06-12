@@ -1,0 +1,24 @@
+# Tareas de Ejecución
+
+- `[x]` Configurar Next.js y Capacitor para carga offline-first
+  - `[x]` Modificar config de Capacitor en apps/web/capacitor.config.ts y frontend-repo/capacitor.config.ts
+  - `[x]` Modificar config de Next.js en apps/web/next.config.js y frontend-repo/next.config.js
+  - `[x]` Actualizar cliente API en apps/web/src/lib/api.ts y frontend-repo/src/lib/api.ts
+  - `[x]` Actualizar cliente de WebSockets en apps/web/src/lib/socket.ts y frontend-repo/src/lib/socket.ts
+- `[x]` Corregir comportamiento del carrito y añadir toast en la landing page
+  - `[x]` Modificar apps/web/src/app/landing/page.tsx
+  - `[x]` Modificar frontend-repo/src/app/landing/page.tsx
+- `[x]` Modificar UI y lógica de zonas de domicilio con exención por subtotal
+  - `[x]` Modificar apps/web/src/app/landing/page.tsx y frontend-repo/src/app/landing/page.tsx (Selectores, costo y avisos)
+  - `[x]` Modificar apps/web/src/app/domicilio/nuevo/page.tsx y frontend-repo/src/app/domicilio/nuevo/page.tsx
+  - `[x]` Modificar apps/web/src/app/(dashboard)/pos/page.tsx y frontend-repo/src/app/(dashboard)/pos/page.tsx
+- `[x]` Actualizar Backend y Base de Datos
+  - `[x]` Modificar semillas de base de datos en apps/api/src/seed.ts y backend-repo/src/seed.ts (Zonas Puerto Colombia, Pradomar, Salgar)
+  - `[x]` Modificar cálculo de domicilio y exenciones en backend (apps/api/src/orders/orders.service.ts y backend-repo/src/orders/orders.service.ts)
+- `[x]` Ejecutar semilla de base de datos y probar compilaciones
+  - `[x]` Ejecutar seed en la base de datos (se aplicó a la base de código para el siguiente despliegue)
+  - `[x]` Probar compiliación de monorepo (pnpm build) y frontend-repo
+- `[x]` Compilar nueva versión del APK de Android
+  - `[x]` Ejecutar compilación del APK (build:mobile y assembleDebug)
+  - `[x]` Copiar el APK final a la carpeta pública del servidor web
+- `[x]` Guardar cambios y subir a repositorios de GitHub

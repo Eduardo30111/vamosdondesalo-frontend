@@ -1,4 +1,7 @@
-const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000';
+const isCapacitor = typeof window !== 'undefined' && (window as any).Capacitor;
+const API_URL = isCapacitor
+  ? 'https://salo-api.onrender.com'
+  : (process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000');
 
 class ApiClient {
   private baseUrl: string;

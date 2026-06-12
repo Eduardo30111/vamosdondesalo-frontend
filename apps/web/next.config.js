@@ -5,10 +5,14 @@ const withPWA = require('next-pwa')({
   disable: process.env.NODE_ENV === 'development',
 });
 
+const isMobileExport = process.env.EXPORT_MOBILE === 'true';
+
 /** @type {import('next').NextConfig} */
 const nextConfig = {
-  output: process.env.NODE_ENV === 'production' ? 'standalone' : undefined,
+  output: isMobileExport ? 'export' : (process.env.NODE_ENV === 'production' ? 'standalone' : undefined),
+  trailingSlash: isMobileExport ? true : undefined,
   images: {
+    unoptimized: isMobileExport ? true : undefined,
     remotePatterns: [
       { protocol: 'https', hostname: 'images.unsplash.com' },
       { protocol: 'https', hostname: 'via.placeholder.com' },

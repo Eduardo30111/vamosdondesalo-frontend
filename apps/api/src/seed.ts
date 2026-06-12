@@ -88,8 +88,9 @@ async function main() {
 
   await prisma.deliveryZone.createMany({
     data: [
-      { name: 'Zona Centro', fee: 2500, enabled: true },
-      { name: 'Zona Norte', fee: 4000, enabled: true },
+      { name: 'Puerto Colombia', fee: 2000, enabled: true },
+      { name: 'Pradomar', fee: 3000, enabled: true },
+      { name: 'Salgar', fee: 5000, enabled: true },
     ],
   });
 

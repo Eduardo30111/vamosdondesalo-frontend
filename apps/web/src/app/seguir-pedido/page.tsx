@@ -1,7 +1,7 @@
 import { Suspense } from 'react';
 import SeguirPedidoClient from './SeguirPedidoClient';
 
-export const dynamic = 'force-dynamic';
+export const dynamic = 'auto';
 
 export default function SeguirPedidoPage() {
   return (

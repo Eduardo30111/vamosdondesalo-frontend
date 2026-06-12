@@ -1,6 +1,9 @@
 import { io, Socket } from 'socket.io-client';
 
-const WS_URL = process.env.NEXT_PUBLIC_WS_URL || 'http://localhost:4000';
+const isCapacitor = typeof window !== 'undefined' && (window as any).Capacitor;
+const WS_URL = isCapacitor
+  ? 'https://salo-api.onrender.com'
+  : (process.env.NEXT_PUBLIC_WS_URL || 'http://localhost:4000');
 
 let socket: Socket | null = null;
 

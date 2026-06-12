@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useCallback } from 'react';
 import Link from 'next/link';
+import { toast } from 'sonner';
 
 import { MapPin, Phone, Search, Clock, ShoppingCart, Plus, Minus, Trash2, X, ChevronLeft, ChevronRight, User, LayoutDashboard, ChefHat, ShoppingBag } from 'lucide-react';
 
@@ -111,7 +112,7 @@ export default function LandingPage() {
       }
       return [...prev, { product, qty: 1 }];
     });
-    setShowCart(true);
+    toast.success(`${product.name} agregado al pedido`, { duration: 1500 });
   };
 
   const updateQty = (productId: string, delta: number) => {
@@ -139,7 +140,26 @@ export default function LandingPage() {
   };
 
   const cartTotal = cart.reduce((sum, item) => sum + item.product.salePrice * item.qty, 0);
-  const deliveryFee = customerData.zone ? deliveryZones.find((z) => z.id === customerData.zone)?.fee || 0 : 0;
+  
+  const getDeliveryFee = () => {
+    if (!customerData.zone) return 0;
+    const zone = deliveryZones.find((z) => z.id === customerData.zone);
+    if (!zone) return 0;
+    
+    const zoneNameClean = zone.name.toLowerCase().trim();
+    if (zoneNameClean.includes('puerto colombia') || zoneNameClean.includes('puerto col') || zoneNameClean.includes('pradomar')) {
+      if (cartTotal > 10000) {
+        return 0;
+      }
+    } else if (zoneNameClean.includes('salgar')) {
+      if (cartTotal >= 18000) {
+        return 0;
+      }
+    }
+    return zone.fee;
+  };
+
+  const deliveryFee = getDeliveryFee();
   const total = cartTotal + deliveryFee;
   const cartCount = cart.reduce((sum, item) => sum + item.qty, 0);
 
@@ -162,8 +182,6 @@ export default function LandingPage() {
       }
     }
 
-    const zone = deliveryZones.find((z) => z.id === customerData.zone);
-
     try {
       const res = await fetch(`${API_URL}/public/orders`, {
         method: 'POST',
@@ -174,7 +192,7 @@ export default function LandingPage() {
           customerPhone: customerData.phone,
           customerAddress: customerData.address,
           deliveryZoneId: customerData.zone,
-          deliveryFee: zone?.fee || 0,
+          deliveryFee,
           items: cart.map((item) => ({
             productId: item.product.id,
             qty: item.qty,
@@ -485,10 +503,29 @@ export default function LandingPage() {
                   <option value="">Selecciona zona de domicilio</option>
                   {deliveryZones.map((zone) => (
                     <option key={zone.id} value={zone.id}>
-                      {zone.name} — ${zone.fee.toLocaleString('es-CO')}
+                      {zone.name}
                     </option>
                   ))}
                 </select>
+                {(() => {
+                  const zone = deliveryZones.find((z) => z.id === customerData.zone);
+                  if (!zone) return null;
+                  const zoneNameClean = zone.name.toLowerCase().trim();
+                  if (zoneNameClean.includes('puerto colombia') || zoneNameClean.includes('puerto col') || zoneNameClean.includes('pradomar')) {
+                    return (
+                      <p className="text-xs text-orange-600 dark:text-orange-400 font-medium mt-1">
+                        Por la compra de más de $10.000 pesos no se cobra domicilio
+                      </p>
+                    );
+                  } else if (zoneNameClean.includes('salgar')) {
+                    return (
+                      <p className="text-xs text-orange-600 dark:text-orange-400 font-medium mt-1">
+                        Por la compra de $18.000 pesos o más no se cobra domicilio
+                      </p>
+                    );
+                  }
+                  return null;
+                })()}
               </div>
 
               {/* Total with delivery */}

@@ -1,0 +1,25 @@
+{
+  "name": "Vamos Donde Salo!",
+  "short_name": "Donde Salo",
+  "description": "Sistema POS - Vamos Donde Salo!",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#FFF8F0",
+  "theme_color": "#E8720C",
+  "orientation": "any",
+  "categories": ["business", "food"],
+  "icons": [
+    {
+      "src": "/icons/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}

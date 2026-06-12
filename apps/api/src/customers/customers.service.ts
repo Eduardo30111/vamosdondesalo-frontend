@@ -64,10 +64,16 @@ export class CustomersService {
     });
   }
 
-  async charge(customerId: string, amount: number) {
+  async charge(customerId: string, amount: number, note?: string, createdAt?: Date) {
     const [credit] = await this.prisma.$transaction([
       this.prisma.credit.create({
-        data: { customerId, amount, type: 'CHARGE' },
+        data: { 
+          customerId, 
+          amount, 
+          type: 'CHARGE',
+          note,
+          createdAt: createdAt ? new Date(createdAt) : undefined,
+        },
       }),
       this.prisma.customer.update({
         where: { id: customerId },
@@ -77,12 +83,17 @@ export class CustomersService {
     return credit;
   }
 
-  async payment(customerId: string, amount: number) {
+  async payment(customerId: string, amount: number, note?: string) {
     const customer = await this.prisma.customer.findUniqueOrThrow({ where: { id: customerId } });
     const actualAmount = Math.min(amount, customer.totalDebt);
     const [credit] = await this.prisma.$transaction([
       this.prisma.credit.create({
-        data: { customerId, amount: actualAmount, type: 'PAYMENT' },
+        data: { 
+          customerId, 
+          amount: actualAmount, 
+          type: 'PAYMENT',
+          note,
+        },
       }),
       this.prisma.customer.update({
         where: { id: customerId },

@@ -53,13 +53,14 @@ export class CustomersController {
 
   @Post(':id/charge')
   @Roles('ADMIN', 'VENDEDOR')
-  charge(@Param('id') id: string, @Body() body: { amount: number }) {
-    return this.service.charge(id, body.amount);
+  charge(@Param('id') id: string, @Body() body: { amount: number; note?: string; createdAt?: string }) {
+    const date = body.createdAt ? new Date(body.createdAt) : undefined;
+    return this.service.charge(id, body.amount, body.note, date);
   }
 
   @Post(':id/payment')
   @Roles('ADMIN', 'VENDEDOR')
-  payment(@Param('id') id: string, @Body() body: { amount: number }) {
-    return this.service.payment(id, body.amount);
+  payment(@Param('id') id: string, @Body() body: { amount: number; note?: string }) {
+    return this.service.payment(id, body.amount, body.note);
   }
 }

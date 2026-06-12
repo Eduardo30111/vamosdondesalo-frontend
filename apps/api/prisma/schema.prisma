@@ -194,6 +194,7 @@ model Credit {
   customerId String
   amount     Float
   type       String
+  note       String?
   createdAt  DateTime @default(now())
   customer   Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
 }

@@ -34,9 +34,33 @@ export default function FiadosPage() {
   const [paymentNote, setPaymentNote] = useState('');
   const [search, setSearch] = useState('');
 
+  // New states for Add Charge feature
+  const [showAddCharge, setShowAddCharge] = useState(false);
+  const [products, setProducts] = useState<any[]>([]);
+  const [isNewCustomer, setIsNewCustomer] = useState(false);
+  const [customerIdForCharge, setCustomerIdForCharge] = useState('');
+  const [newCustomerName, setNewCustomerName] = useState('');
+  const [newCustomerCedula, setNewCustomerCedula] = useState('');
+  const [newCustomerPhone, setNewCustomerPhone] = useState('');
+  const [selectedProductId, setSelectedProductId] = useState('');
+  const [customProductNote, setCustomProductNote] = useState('');
+  const [productPrice, setProductPrice] = useState('');
+  const [productQty, setProductQty] = useState(1);
+  const [chargeDate, setChargeDate] = useState(() => new Date().toISOString().split('T')[0]);
+
   useEffect(() => {
     loadCustomers();
+    loadProducts();
   }, []);
+
+  const loadProducts = async () => {
+    try {
+      const data = await api.get<any[]>('/public/products');
+      setProducts(data);
+    } catch (err) {
+      console.error('Error cargando productos', err);
+    }
+  };
 
   const loadCustomers = async () => {
     try {
@@ -76,6 +100,39 @@ export default function FiadosPage() {
     }
   };
 
+  const handleCreateCharge = async () => {
+    let customerId = customerIdForCharge;
+    try {
+      if (isNewCustomer) {
+        const c = await api.post<any>('/customers', {
+          name: newCustomerName,
+          cedula: newCustomerCedula,
+          phone: newCustomerPhone || undefined,
+        });
+        customerId = c.id;
+      }
+
+      if (!customerId) return;
+
+      const price = parseFloat(productPrice);
+      const totalAmount = price * productQty;
+      const note = `${customProductNote} (x${productQty})`;
+
+      await api.post(`/customers/${customerId}/charge`, {
+        amount: totalAmount,
+        note,
+        createdAt: chargeDate,
+      });
+
+      toast.success('Fiado registrado correctamente');
+      setShowAddCharge(false);
+      loadCustomers();
+      loadCustomerDetail(customerId);
+    } catch (err: unknown) {
+      toast.error(err instanceof Error ? err.message : 'Error registrando fiado');
+    }
+  };
+
   const isDelinquent = (customer: Customer) => {
     if (customer.totalDebt <= 0) return false;
     const oldestUnpaid = customer.credits.find(c => c.type === 'CHARGE');
@@ -104,6 +161,25 @@ export default function FiadosPage() {
           <CreditCard className="text-salo-orange" />
           Fiados
         </h1>
+        <button
+          onClick={() => {
+            setShowAddCharge(true);
+            setIsNewCustomer(false);
+            setCustomerIdForCharge('');
+            setNewCustomerName('');
+            setNewCustomerCedula('');
+            setNewCustomerPhone('');
+            setSelectedProductId('');
+            setCustomProductNote('');
+            setProductPrice('');
+            setProductQty(1);
+            setChargeDate(new Date().toISOString().split('T')[0]);
+          }}
+          className="px-4 py-2 bg-salo-orange text-white rounded-xl font-medium text-sm hover:opacity-90 transition flex items-center gap-1.5 shadow-sm font-sans"
+        >
+          <Plus size={16} />
+          Añadir Fiado
+        </button>
       </div>
 
       <div className="flex flex-col lg:flex-row gap-6">
@@ -239,6 +315,179 @@ export default function FiadosPage() {
                 className="flex-1 py-2.5 bg-green-600 text-white rounded-xl font-medium text-sm hover:bg-green-700 disabled:opacity-50"
               >
                 Confirmar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Add Charge Modal */}
+      {showAddCharge && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+          <div className="bg-white dark:bg-gray-800 rounded-2xl w-full max-w-md p-6 shadow-2xl overflow-y-auto max-h-[90vh] text-left">
+            <h3 className="text-lg font-bold mb-4">Registrar Nuevo Fiado</h3>
+            
+            <div className="space-y-4">
+              {/* Cliente */}
+              <div>
+                <label className="block text-xs font-semibold text-gray-500 mb-1">Cliente</label>
+                <div className="flex gap-4 mb-2">
+                  <label className="flex items-center gap-1.5 text-sm">
+                    <input
+                      type="radio"
+                      checked={!isNewCustomer}
+                      onChange={() => setIsNewCustomer(false)}
+                      className="text-salo-orange focus:ring-salo-orange"
+                    />
+                    Existente
+                  </label>
+                  <label className="flex items-center gap-1.5 text-sm">
+                    <input
+                      type="radio"
+                      checked={isNewCustomer}
+                      onChange={() => setIsNewCustomer(true)}
+                      className="text-salo-orange focus:ring-salo-orange"
+                    />
+                    Nuevo Cliente
+                  </label>
+                </div>
+
+                {!isNewCustomer ? (
+                  <select
+                    value={customerIdForCharge}
+                    onChange={(e) => setCustomerIdForCharge(e.target.value)}
+                    className="w-full px-3 py-2 rounded-xl border border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 text-sm outline-none focus:ring-2 focus:ring-salo-orange"
+                  >
+                    <option value="">Selecciona un cliente...</option>
+                    {customers.map((c) => (
+                      <option key={c.id} value={c.id}>
+                        {c.name} (CC: {c.cedula})
+                      </option>
+                    ))}
+                  </select>
+                ) : (
+                  <div className="space-y-2">
+                    <input
+                      type="text"
+                      placeholder="Nombre del cliente"
+                      value={newCustomerName}
+                      onChange={(e) => setNewCustomerName(e.target.value)}
+                      className="w-full px-3 py-2 rounded-xl border border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 text-sm"
+                    />
+                    <input
+                      type="text"
+                      placeholder="Cédula"
+                      value={newCustomerCedula}
+                      onChange={(e) => setNewCustomerCedula(e.target.value)}
+                      className="w-full px-3 py-2 rounded-xl border border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 text-sm"
+                    />
+                    <input
+                      type="tel"
+                      placeholder="Teléfono (opcional)"
+                      value={newCustomerPhone}
+                      onChange={(e) => setNewCustomerPhone(e.target.value)}
+                      className="w-full px-3 py-2 rounded-xl border border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 text-sm"
+                    />
+                  </div>
+                )}
+              </div>
+
+              {/* Producto */}
+              <div>
+                <label className="block text-xs font-semibold text-gray-500 mb-1">Producto</label>
+                <select
+                  value={selectedProductId}
+                  onChange={(e) => {
+                    const id = e.target.value;
+                    setSelectedProductId(id);
+                    if (id === 'custom') {
+                      setCustomProductNote('');
+                      setProductPrice('');
+                    } else {
+                      const prod = products.find(p => p.id === id);
+                      if (prod) {
+                        setCustomProductNote(prod.name);
+                        setProductPrice(prod.salePrice.toString());
+                      }
+                    }
+                  }}
+                  className="w-full px-3 py-2 rounded-xl border border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 text-sm outline-none focus:ring-2 focus:ring-salo-orange mb-2"
+                >
+                  <option value="">Selecciona un producto...</option>
+                  {products.map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.name} (${p.salePrice.toLocaleString('es-CO')})
+                    </option>
+                  ))}
+                  <option value="custom">Otro / Personalizado</option>
+                </select>
+
+                {selectedProductId === 'custom' && (
+                  <input
+                    type="text"
+                    placeholder="Descripción del producto"
+                    value={customProductNote}
+                    onChange={(e) => setCustomProductNote(e.target.value)}
+                    className="w-full px-3 py-2 rounded-xl border border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 text-sm mb-2"
+                  />
+                )}
+
+                <div className="flex gap-2">
+                  <div className="flex-1">
+                    <label className="block text-[10px] text-gray-400 mb-0.5">Precio Unitario</label>
+                    <input
+                      type="number"
+                      placeholder="Valor"
+                      value={productPrice}
+                      onChange={(e) => setProductPrice(e.target.value)}
+                      disabled={selectedProductId !== 'custom' && !!selectedProductId}
+                      className="w-full px-3 py-2 rounded-xl border border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 text-sm disabled:opacity-75"
+                    />
+                  </div>
+                  <div className="w-24">
+                    <label className="block text-[10px] text-gray-400 mb-0.5">Cantidad</label>
+                    <input
+                      type="number"
+                      min="1"
+                      value={productQty}
+                      onChange={(e) => setProductQty(Math.max(1, parseInt(e.target.value) || 1))}
+                      className="w-full px-3 py-2 rounded-xl border border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 text-sm"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* Fecha */}
+              <div>
+                <label className="block text-xs font-semibold text-gray-500 mb-1">Fecha</label>
+                <input
+                  type="date"
+                  value={chargeDate}
+                  onChange={(e) => setChargeDate(e.target.value)}
+                  className="w-full px-3 py-2 rounded-xl border border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 text-sm"
+                />
+              </div>
+            </div>
+
+            <div className="mt-6 flex gap-2">
+              <button
+                onClick={() => setShowAddCharge(false)}
+                className="flex-1 py-2.5 border border-gray-200 dark:border-gray-600 rounded-xl font-medium text-sm"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={handleCreateCharge}
+                disabled={
+                  (!isNewCustomer && !customerIdForCharge) ||
+                  (isNewCustomer && (!newCustomerName || !newCustomerCedula)) ||
+                  !customProductNote ||
+                  !productPrice ||
+                  parseFloat(productPrice) <= 0
+                }
+                className="flex-1 py-2.5 bg-salo-orange text-white rounded-xl font-medium text-sm hover:opacity-90 disabled:opacity-50"
+              >
+                Registrar Deuda
               </button>
             </div>
           </div>
