@@ -279,6 +279,24 @@ export default function POSPage() {
           orderData,
         });
       }
+      
+      // Deduct stock of Vitrina products offline
+      const updatedProducts = products.map((p) => {
+        const cartItem = cart.items.find((item) => item.productId === p.id);
+        if (cartItem && p.preparationMode === 'VITRINA') {
+          const currentStock = p.vitrinaStock?.qty ?? 0;
+          return {
+            ...p,
+            vitrinaStock: {
+              qty: Math.max(0, currentStock - cartItem.qty),
+            },
+          };
+        }
+        return p;
+      });
+      setProducts(updatedProducts);
+      localStorage.setItem('salo_cached_products', JSON.stringify(updatedProducts));
+
       setOfflineCount(getOfflineQueue().length);
       toast.warning('Sin conexión. Pedido guardado localmente en cola.');
       setShowPayment(false);
@@ -313,6 +331,24 @@ export default function POSPage() {
             orderData,
           });
         }
+
+        // Deduct stock of Vitrina products offline on fallback
+        const updatedProducts = products.map((p) => {
+          const cartItem = cart.items.find((item) => item.productId === p.id);
+          if (cartItem && p.preparationMode === 'VITRINA') {
+            const currentStock = p.vitrinaStock?.qty ?? 0;
+            return {
+              ...p,
+              vitrinaStock: {
+                qty: Math.max(0, currentStock - cartItem.qty),
+              },
+            };
+          }
+          return p;
+        });
+        setProducts(updatedProducts);
+        localStorage.setItem('salo_cached_products', JSON.stringify(updatedProducts));
+
         setOfflineCount(getOfflineQueue().length);
         toast.warning('Error de red. Pedido guardado localmente para reintentar.');
         setShowPayment(false);

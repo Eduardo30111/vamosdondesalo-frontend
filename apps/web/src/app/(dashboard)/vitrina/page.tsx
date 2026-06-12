@@ -6,6 +6,8 @@ import { api } from '@/lib/api';
 import { useAuthStore } from '@/store/auth';
 import { getSocket, joinRoom } from '@/lib/socket';
 import { formatCurrency } from '@/lib/utils';
+import { toast } from 'sonner';
+import { getOfflineQueue, saveOfflineQueue, removeFromOfflineQueue, syncOfflineQueue, OfflineQueueItem } from '@/lib/offline-queue';
 import {
   DollarSign,
   Edit3,
@@ -54,12 +56,55 @@ interface Product {
   vitrinaStock: { qty: number } | null;
 }
 
+const getOrderTotalLocal = (item: OfflineQueueItem) => {
+  const cachedProducts = JSON.parse(localStorage.getItem('salo_cached_products') || '[]');
+  return item.orderData.items.reduce((sum: number, it: any) => {
+    const product = cachedProducts.find((p: any) => p.id === it.productId);
+    return sum + (product?.salePrice || 0) * it.qty;
+  }, 0);
+};
+
+const queueItemToOrder = (item: OfflineQueueItem): Order => {
+  const cachedProducts = JSON.parse(localStorage.getItem('salo_cached_products') || '[]');
+  const cachedTables = JSON.parse(localStorage.getItem('salo_cached_tables') || '[]');
+  
+  const items: OrderItem[] = item.orderData.items.map((i, index) => {
+    const product = cachedProducts.find((p: any) => p.id === i.productId);
+    return {
+      id: `${item.id}-item-${index}`,
+      qty: i.qty,
+      unitPrice: product?.salePrice || 0,
+      product: {
+        id: i.productId,
+        name: product?.name || 'Producto Desconocido',
+        preparationMode: product?.preparationMode || 'PREPARADO',
+      }
+    };
+  });
+
+  const total = items.reduce((sum, it) => sum + it.unitPrice * it.qty, 0);
+  const tableObj = cachedTables.find((t: any) => t.id === item.orderData.tableId);
+
+  return {
+    id: item.id,
+    customerName: item.orderData.customerName,
+    status: 'PENDIENTE',
+    type: item.orderData.type,
+    total: total,
+    createdAt: item.createdAt,
+    items: items,
+    table: tableObj ? { number: tableObj.number } : undefined
+  };
+};
+
 export default function VitrinaPage() {
   const router = useRouter();
   const { user, hydrate } = useAuthStore();
   const [orders, setOrders] = useState<Order[]>([]);
   const [expanded, setExpanded] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [isOnline, setIsOnline] = useState(true);
+  const [syncing, setSyncing] = useState(false);
 
   // Fiar modal
   const [showFiarModal, setShowFiarModal] = useState(false);
@@ -88,28 +133,94 @@ export default function VitrinaPage() {
 
   useEffect(() => {
     if (user && user.role !== 'COCINA') fetchOrders();
-    const socket = getSocket();
-    joinRoom('pos');
 
-    const handleVitrinaUpdated = () => fetchOrders();
-    const handleOrderStatusChanged = () => fetchOrders();
+    if (typeof window !== 'undefined') {
+      setIsOnline(navigator.onLine);
 
-    socket.on('vitrina:updated', handleVitrinaUpdated);
-    socket.on('order:status_changed', handleOrderStatusChanged);
+      const handleOnline = () => {
+        setIsOnline(true);
+        handleSyncQueue();
+      };
+      
+      const handleOffline = () => {
+        setIsOnline(false);
+      };
 
-    return () => {
-      socket.off('vitrina:updated', handleVitrinaUpdated);
-      socket.off('order:status_changed', handleOrderStatusChanged);
-    };
+      window.addEventListener('online', handleOnline);
+      window.addEventListener('offline', handleOffline);
+
+      const syncInterval = setInterval(async () => {
+        if (navigator.onLine) {
+          const queue = getOfflineQueue();
+          if (queue.length > 0) {
+            handleSyncQueue();
+          }
+        }
+      }, 20000);
+
+      const socket = getSocket();
+      joinRoom('pos');
+
+      const handleVitrinaUpdated = () => fetchOrders();
+      const handleOrderStatusChanged = () => fetchOrders();
+
+      socket.on('vitrina:updated', handleVitrinaUpdated);
+      socket.on('order:status_changed', handleOrderStatusChanged);
+
+      return () => {
+        window.removeEventListener('online', handleOnline);
+        window.removeEventListener('offline', handleOffline);
+        clearInterval(syncInterval);
+        socket.off('vitrina:updated', handleVitrinaUpdated);
+        socket.off('order:status_changed', handleOrderStatusChanged);
+      };
+    }
   }, [user]);
+
+  const handleSyncQueue = async () => {
+    if (syncing) return;
+    setSyncing(true);
+    try {
+      const result = await syncOfflineQueue();
+      if (result.success > 0) {
+        toast.success(`${result.success} pedido(s) local(es) sincronizado(s) automáticamente`);
+        fetchOrders();
+      }
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setSyncing(false);
+    }
+  };
 
   const fetchOrders = async () => {
     try {
       setLoading(true);
-      const data = await api.get<Order[]>('/orders/cuentas-activas');
-      setOrders(data || []);
+      let serverOrders: Order[] = [];
+      if (navigator.onLine) {
+        serverOrders = await api.get<Order[]>('/orders/cuentas-activas');
+        localStorage.setItem('salo_cached_active_orders', JSON.stringify(serverOrders));
+      } else {
+        const cached = localStorage.getItem('salo_cached_active_orders');
+        serverOrders = cached ? JSON.parse(cached) : [];
+      }
+      
+      const queue = getOfflineQueue();
+      const offlineOrders = queue
+        .filter((item) => item.type === 'STANDARD')
+        .map(queueItemToOrder);
+
+      setOrders([...offlineOrders, ...serverOrders]);
     } catch (e) {
       console.error(e);
+      const cached = localStorage.getItem('salo_cached_active_orders');
+      const serverOrders = cached ? JSON.parse(cached) : [];
+      const queue = getOfflineQueue();
+      const offlineOrders = queue
+        .filter((item) => item.type === 'STANDARD')
+        .map(queueItemToOrder);
+
+      setOrders([...offlineOrders, ...serverOrders]);
     } finally {
       setLoading(false);
     }
@@ -118,6 +229,23 @@ export default function VitrinaPage() {
   // ─── Cobrar en efectivo ───────────────────
   const pagar = async (id: string) => {
     if (!confirm('¿Cobrar este pedido en efectivo?')) return;
+    
+    if (id.startsWith('local-')) {
+      const queue = getOfflineQueue();
+      const itemIndex = queue.findIndex((it) => it.id === id);
+      if (itemIndex > -1) {
+        queue[itemIndex].type = 'PAID';
+        queue[itemIndex].paymentData = {
+          method: 'CASH',
+          amount: getOrderTotalLocal(queue[itemIndex]),
+        };
+        saveOfflineQueue(queue);
+        toast.success('Pago en efectivo registrado localmente. Se sincronizará al recuperar conexión.');
+        fetchOrders();
+      }
+      return;
+    }
+
     try {
       const order = orders.find((o) => o.id === id);
       const amount = order ? order.total : 0;
@@ -132,6 +260,29 @@ export default function VitrinaPage() {
   // ─── Cancelar pedido ─────────────────────
   const cancelar = async (id: string) => {
     if (!confirm('¿Cancelar este pedido? El stock de vitrina se devolverá.')) return;
+    
+    if (id.startsWith('local-')) {
+      const queue = getOfflineQueue();
+      const item = queue.find((it) => it.id === id);
+      if (item) {
+        // Restore stock
+        const cachedProducts = JSON.parse(localStorage.getItem('salo_cached_products') || '[]');
+        item.orderData.items.forEach((it: any) => {
+          const product = cachedProducts.find((p: any) => p.id === it.productId);
+          if (product && product.preparationMode === 'VITRINA') {
+            if (!product.vitrinaStock) product.vitrinaStock = { qty: 0 };
+            product.vitrinaStock.qty += it.qty;
+          }
+        });
+        localStorage.setItem('salo_cached_products', JSON.stringify(cachedProducts));
+        
+        removeFromOfflineQueue(id);
+        toast.success('Pedido local cancelado y stock de vitrina restaurado.');
+        fetchOrders();
+      }
+      return;
+    }
+
     await api.put(`/orders/${id}/cancelar`);
     fetchOrders();
   };
@@ -150,8 +301,12 @@ export default function VitrinaPage() {
   const buscarCedula = async () => {
     if (!cedula.trim()) return;
     try {
-      const data = await api.get<any>(`/customers/cedula/${cedula}`);
-      setFoundCustomer(data);
+      if (navigator.onLine) {
+        const data = await api.get<any>(`/customers/cedula/${cedula}`);
+        setFoundCustomer(data);
+      } else {
+        setFoundCustomer(null);
+      }
     } catch {
       setFoundCustomer(null);
     }
@@ -159,6 +314,25 @@ export default function VitrinaPage() {
 
   const fiar = async () => {
     if (!fiarOrderId) return;
+    
+    if (fiarOrderId.startsWith('local-')) {
+      const queue = getOfflineQueue();
+      const itemIndex = queue.findIndex((it) => it.id === fiarOrderId);
+      if (itemIndex > -1) {
+        queue[itemIndex].type = 'FIADO';
+        queue[itemIndex].customerData = {
+          cedula,
+          name: newCustomerName || foundCustomer?.name || 'Cliente Fiado',
+          phone: newCustomerPhone || foundCustomer?.phone || undefined,
+        };
+        saveOfflineQueue(queue);
+        setShowFiarModal(false);
+        toast.success('Fiado registrado localmente. Se sincronizará al recuperar conexión.');
+        fetchOrders();
+      }
+      return;
+    }
+
     try {
       let customerId = foundCustomer?.id;
       if (!customerId) {
@@ -186,10 +360,17 @@ export default function VitrinaPage() {
     setEditSearch('');
     setShowEditModal(true);
     try {
-      const prods = await api.get<Product[]>('/products');
+      let prods: Product[] = [];
+      if (navigator.onLine) {
+        prods = await api.get<Product[]>('/products');
+      } else {
+        const cached = localStorage.getItem('salo_cached_products');
+        prods = cached ? JSON.parse(cached) : [];
+      }
       setProducts(prods);
     } catch {
-      setProducts([]);
+      const cached = localStorage.getItem('salo_cached_products');
+      setProducts(cached ? JSON.parse(cached) : []);
     }
   };
 
@@ -213,6 +394,42 @@ export default function VitrinaPage() {
 
   const confirmarAgregarItems = async () => {
     if (!editOrder || newItems.length === 0) return;
+    
+    if (editOrder.id.startsWith('local-')) {
+      const queue = getOfflineQueue();
+      const itemIndex = queue.findIndex((it) => it.id === editOrder.id);
+      if (itemIndex > -1) {
+        newItems.forEach((newItem) => {
+          const existing = queue[itemIndex].orderData.items.find((i) => i.productId === newItem.product.id);
+          if (existing) {
+            existing.qty += newItem.qty;
+          } else {
+            queue[itemIndex].orderData.items.push({
+              productId: newItem.product.id,
+              qty: newItem.qty,
+            });
+          }
+          
+          // Deduct local stock for added items
+          const cachedProducts = JSON.parse(localStorage.getItem('salo_cached_products') || '[]');
+          const product = cachedProducts.find((p: any) => p.id === newItem.product.id);
+          if (product && product.preparationMode === 'VITRINA') {
+            if (!product.vitrinaStock) product.vitrinaStock = { qty: 0 };
+            product.vitrinaStock.qty = Math.max(0, product.vitrinaStock.qty - newItem.qty);
+            localStorage.setItem('salo_cached_products', JSON.stringify(cachedProducts));
+          }
+        });
+        
+        saveOfflineQueue(queue);
+        setShowEditModal(false);
+        setEditOrder(null);
+        setNewItems([]);
+        toast.success('Productos agregados al pedido local.');
+        fetchOrders();
+      }
+      return;
+    }
+
     setAddingItems(true);
     try {
       await api.put(`/orders/${editOrder.id}/add-items`, {
@@ -251,6 +468,24 @@ export default function VitrinaPage() {
 
   const confirmarNequi = async () => {
     if (!nequiOrderId || nequiAmountNum <= 0) return;
+    
+    if (nequiOrderId.startsWith('local-')) {
+      const queue = getOfflineQueue();
+      const itemIndex = queue.findIndex((it) => it.id === nequiOrderId);
+      if (itemIndex > -1) {
+        queue[itemIndex].type = 'PAID';
+        queue[itemIndex].paymentData = {
+          method: 'NEQUI',
+          amount: nequiOrderTotal,
+        };
+        saveOfflineQueue(queue);
+        setShowNequiModal(false);
+        toast.success('Pago con Nequi registrado localmente. Se sincronizará al recuperar conexión.');
+        fetchOrders();
+      }
+      return;
+    }
+
     setProcessingNequi(true);
     try {
       // Register Nequi payment
@@ -289,7 +524,19 @@ export default function VitrinaPage() {
 
   return (
     <div className="p-4 md:p-8 max-w-5xl mx-auto">
-      <h1 className="text-2xl font-bold mb-2">Vitrina — Cuentas Activas</h1>
+      <div className="flex items-center justify-between mb-2">
+        <h1 className="text-2xl font-bold flex items-center gap-2">Vitrina — Cuentas Activas</h1>
+        <div className="flex items-center gap-2">
+          <span className={`flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold ${
+            isOnline 
+              ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400' 
+              : 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400'
+          }`}>
+            <span className={`w-2 h-2 rounded-full ${isOnline ? 'bg-green-500' : 'bg-red-500 animate-pulse'}`} />
+            {isOnline ? 'En línea' : 'Sin conexión'}
+          </span>
+        </div>
+      </div>
       <p className="text-sm text-gray-500 mb-6">Pedidos entregados esperando pago o fiado.</p>
 
       {/* ═══ Modal Fiar ═══ */}
@@ -558,7 +805,12 @@ export default function VitrinaPage() {
                       {isExpanded ? <ChevronUp size={18} /> : <ChevronDown size={18} />}
                     </button>
                     <div>
-                      <p className="font-bold">{o.customerName}</p>
+                      <p className="font-bold flex items-center gap-1.5">
+                        {o.customerName}
+                        {o.id.startsWith('local-') && (
+                          <span className="text-[10px] bg-orange-100 text-orange-700 px-1.5 py-0.5 rounded-full font-semibold">Local (Sin sincronizar)</span>
+                        )}
+                      </p>
                       <p className="text-xs text-gray-500">
                         {o.type === 'TABLE' ? `Mesa ${o.table?.number || '?'}` : o.type === 'TAKEAWAY' ? 'Para llevar' : 'Domicilio'}
                         {' · '}

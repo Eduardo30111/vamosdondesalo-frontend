@@ -92,29 +92,31 @@ export default function UsuariosPage() {
       </div>
 
       <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-sm border border-gray-100 dark:border-gray-700 overflow-hidden">
-        <table className="w-full">
-          <thead className="bg-gray-50 dark:bg-gray-700">
-            <tr>
-              <th className="text-left px-4 py-3 text-sm font-medium text-gray-500">Nombre</th>
-              <th className="text-left px-4 py-3 text-sm font-medium text-gray-500">Email</th>
-              <th className="text-left px-4 py-3 text-sm font-medium text-gray-500">Rol</th>
-              <th className="text-right px-4 py-3 text-sm font-medium text-gray-500">Acciones</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-gray-100 dark:divide-gray-700">
-            {users.map((u) => (
-              <tr key={u.id}>
-                <td className="px-4 py-3 font-medium">{u.name}</td>
-                <td className="px-4 py-3 text-sm text-gray-500">{u.email}</td>
-                <td className="px-4 py-3"><span className="text-xs bg-salo-orange/10 text-salo-orange px-2 py-1 rounded-lg font-medium">{ROLE_LABELS[u.role]}</span></td>
-                <td className="px-4 py-3 text-right">
-                  <button onClick={() => handleEdit(u)} className="text-blue-500 hover:underline text-sm mr-3"><Pencil size={14} className="inline" /> Editar</button>
-                  <button onClick={() => handleDelete(u.id)} className="text-red-500 hover:underline text-sm"><Trash2 size={14} className="inline" /> Eliminar</button>
-                </td>
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[600px]">
+            <thead className="bg-gray-50 dark:bg-gray-700">
+              <tr>
+                <th className="text-left px-4 py-3 text-sm font-medium text-gray-500">Nombre</th>
+                <th className="text-left px-4 py-3 text-sm font-medium text-gray-500">Email</th>
+                <th className="text-left px-4 py-3 text-sm font-medium text-gray-500">Rol</th>
+                <th className="text-right px-4 py-3 text-sm font-medium text-gray-500">Acciones</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody className="divide-y divide-gray-100 dark:divide-gray-700">
+              {users.map((u) => (
+                <tr key={u.id}>
+                  <td className="px-4 py-3 font-medium">{u.name}</td>
+                  <td className="px-4 py-3 text-sm text-gray-500">{u.email}</td>
+                  <td className="px-4 py-3"><span className="text-xs bg-salo-orange/10 text-salo-orange px-2 py-1 rounded-lg font-medium">{ROLE_LABELS[u.role]}</span></td>
+                  <td className="px-4 py-3 text-right">
+                    <button onClick={() => handleEdit(u)} className="text-blue-500 hover:underline text-sm mr-3"><Pencil size={14} className="inline" /> Editar</button>
+                    <button onClick={() => handleDelete(u.id)} className="text-red-500 hover:underline text-sm"><Trash2 size={14} className="inline" /> Eliminar</button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       </div>
 
       {showForm && (
