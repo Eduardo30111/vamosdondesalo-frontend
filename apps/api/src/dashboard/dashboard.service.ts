@@ -27,10 +27,13 @@ export class DashboardService {
       wastesToday,
     ] = await Promise.all([
       this.prisma.order.count({ where: { createdAt: { gte: start } } }),
-      this.prisma.order.aggregate({ where: { createdAt: { gte: start }, status: 'PAID' }, _sum: { total: true } }),
-      this.prisma.order.count({ where: { status: { in: ['PENDING', 'PREPARING', 'READY', 'DELIVERED'] } } }),
-      this.prisma.order.count({ where: { type: 'DELIVERY', status: { not: 'DELIVERED' } } }),
-      this.prisma.order.count({ where: { status: 'PENDING' } }),
+      this.prisma.order.aggregate({
+        where: { createdAt: { gte: start }, paymentStatus: { in: ['PAID', 'FIADO'] } },
+        _sum: { total: true },
+      }),
+      this.prisma.order.count({ where: { fulfillmentStatus: { in: ['PENDING', 'PREPARING', 'READY', 'DELIVERED'] } } }),
+      this.prisma.order.count({ where: { type: 'DELIVERY', fulfillmentStatus: { not: 'DELIVERED' } } }),
+      this.prisma.order.count({ where: { fulfillmentStatus: 'PENDING' } }),
       this.prisma.orderItem.groupBy({
         by: ['productId'],
         _sum: { qty: true },
@@ -45,7 +48,7 @@ export class DashboardService {
     const totalSales = salesTodayAgg._sum.total || 0;
 
     const orderItemsToday = await this.prisma.orderItem.findMany({
-      where: { order: { createdAt: { gte: start }, status: 'PAID' } },
+      where: { order: { createdAt: { gte: start }, paymentStatus: { in: ['PAID', 'FIADO'] } } },
       include: { product: { select: { costPrice: true, type: true } } },
     });
 
@@ -83,7 +86,7 @@ export class DashboardService {
     weekAgo.setHours(0, 0, 0, 0);
 
     const weeklySales = await this.prisma.order.findMany({
-      where: { createdAt: { gte: weekAgo }, status: 'PAID' },
+      where: { createdAt: { gte: weekAgo }, paymentStatus: { in: ['PAID', 'FIADO'] } },
       select: { total: true, createdAt: true },
     });
 
@@ -148,7 +151,7 @@ export class DashboardService {
   async getTopSellers() {
     const { start } = this.getTodayRange();
     const paidOrders = await this.prisma.order.findMany({
-      where: { createdAt: { gte: start }, status: 'PAID' },
+      where: { createdAt: { gte: start }, paymentStatus: { in: ['PAID', 'FIADO'] } },
       select: { total: true, customerName: true },
     });
 

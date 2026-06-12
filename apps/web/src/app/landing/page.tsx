@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useCallback } from 'react';
 import Link from 'next/link';
-import Image from 'next/image';
+
 import { MapPin, Phone, Search, Clock, ShoppingCart, Plus, Minus, Trash2, X, ChevronLeft, ChevronRight, User, LayoutDashboard, ChefHat, ShoppingBag } from 'lucide-react';
 
 interface Product {
@@ -11,6 +11,8 @@ interface Product {
   description: string | null;
   salePrice: number;
   photoUrl: string | null;
+  remaining?: number;
+  preparationMode?: string;
 }
 
 interface AppConfig {
@@ -92,6 +94,14 @@ export default function LandingPage() {
 
   // Cart functions
   const addToCart = (product: Product) => {
+    const existing = cart.find((item) => item.product.id === product.id);
+    const currentQty = existing ? existing.qty : 0;
+    if (product.remaining !== undefined) {
+      if (currentQty + 1 > product.remaining) {
+        alert(`No hay suficiente stock en vitrina (Disponible: ${product.remaining})`);
+        return;
+      }
+    }
     setCart((prev) => {
       const existing = prev.find((item) => item.product.id === product.id);
       if (existing) {
@@ -107,9 +117,19 @@ export default function LandingPage() {
   const updateQty = (productId: string, delta: number) => {
     setCart((prev) =>
       prev
-        .map((item) =>
-          item.product.id === productId ? { ...item, qty: Math.max(0, item.qty + delta) } : item
-        )
+        .map((item) => {
+          if (item.product.id === productId) {
+            const nextQty = item.qty + delta;
+            if (delta > 0 && item.product.remaining !== undefined) {
+              if (nextQty > item.product.remaining) {
+                alert(`No hay suficiente stock en vitrina (Disponible: ${item.product.remaining})`);
+                return item;
+              }
+            }
+            return { ...item, qty: Math.max(0, nextQty) };
+          }
+          return item;
+        })
         .filter((item) => item.qty > 0)
     );
   };
@@ -131,6 +151,15 @@ export default function LandingPage() {
     if (cart.length === 0) {
       alert('El carrito está vacío');
       return;
+    }
+    // Validar stock para productos de vitrina
+    for (const item of cart) {
+      if (item.product.remaining !== undefined) {
+        if (item.qty > item.product.remaining) {
+          alert(`No hay suficiente stock de "${item.product.name}" en la vitrina (Disponible: ${item.product.remaining})`);
+          return;
+        }
+      }
     }
 
     const zone = deliveryZones.find((z) => z.id === customerData.zone);
@@ -222,12 +251,10 @@ export default function LandingPage() {
             key={i}
             className={`absolute inset-0 transition-opacity duration-700 ${i === currentBanner ? 'opacity-100' : 'opacity-0'}`}
           >
-            <Image
+            <img
               src={banner}
               alt={`Banner ${i + 1}`}
-              fill
-              className="object-cover"
-              priority={i === 0}
+              className="absolute inset-0 w-full h-full object-cover"
             />
             <div className="absolute inset-0 bg-gradient-to-t from-black/60 to-transparent" />
           </div>
@@ -286,7 +313,7 @@ export default function LandingPage() {
             <div key={product.id} className="bg-white dark:bg-gray-800 rounded-2xl p-3 shadow-sm border border-gray-100 dark:border-gray-700 flex flex-col">
               <div className="aspect-square rounded-xl overflow-hidden mb-3 bg-gray-100 dark:bg-gray-700 relative">
                 {product.photoUrl ? (
-                  <Image src={product.photoUrl} alt={product.name} fill className="object-cover" sizes="200px" />
+                  <img src={product.photoUrl} alt={product.name} className="w-full h-full object-cover" />
                 ) : (
                   <div className="w-full h-full flex items-center justify-center text-gray-400 text-sm">Sin imagen</div>
                 )}
@@ -344,7 +371,7 @@ export default function LandingPage() {
                   <div key={item.product.id} className="flex gap-3 bg-gray-50 dark:bg-gray-700 rounded-xl p-3">
                     <div className="w-16 h-16 rounded-lg bg-gray-200 dark:bg-gray-600 relative overflow-hidden flex-shrink-0">
                       {item.product.photoUrl ? (
-                        <Image src={item.product.photoUrl} alt={item.product.name} fill className="object-cover" />
+                        <img src={item.product.photoUrl} alt={item.product.name} className="w-full h-full object-cover" />
                       ) : (
                         <div className="w-full h-full flex items-center justify-center text-xs text-gray-400">Sin img</div>
                       )}

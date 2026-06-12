@@ -4,8 +4,7 @@ import { useEffect, useState } from 'react';
 import { toast } from 'sonner';
 import { api } from '@/lib/api';
 import { formatCurrency } from '@/lib/utils';
-import { Plus, Pencil, Trash2, X, Package } from 'lucide-react';
-import Image from 'next/image';
+import { Plus, Pencil, Trash2, X, Package, ImageIcon } from 'lucide-react';
 
 interface Product {
   id: string;
@@ -35,12 +34,27 @@ const emptyForm: FormData = { name: '', description: '', photoUrl: '', salePrice
 
 export default function ProductosPage() {
   const [products, setProducts] = useState<Product[]>([]);
+  const [suppliers, setSuppliers] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
   const [editId, setEditId] = useState<string | null>(null);
   const [form, setForm] = useState<FormData>(emptyForm);
+  const [file, setFile] = useState<File | null>(null);
+  const [preview, setPreview] = useState<string | null>(null);
 
-  useEffect(() => { loadProducts(); }, []);
+  useEffect(() => {
+    loadProducts();
+    loadSuppliers();
+  }, []);
+
+  const loadSuppliers = async () => {
+    try {
+      const data = await api.get<any[]>('/suppliers');
+      setSuppliers(data);
+    } catch (err: unknown) {
+      console.error(err);
+    }
+  };
 
   const loadProducts = async () => {
     try {
@@ -56,16 +70,30 @@ export default function ProductosPage() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
+      // Build the payload from current form state
+      let payload = { ...form };
+
+      // If a file was selected, upload it first and set the URL in the payload
+      if (file) {
+        const fd = new FormData();
+        fd.append('file', file);
+        const up = await api.upload<{ url: string; publicId: string }>('/upload/product-image', fd);
+        payload.photoUrl = up.url;
+        setForm(payload);
+      }
+
       if (editId) {
-        await api.put(`/products/${editId}`, form);
+        await api.put(`/products/${editId}`, payload);
         toast.success('Producto actualizado');
       } else {
-        await api.post('/products', form);
+        await api.post('/products', payload);
         toast.success('Producto creado');
       }
       setShowForm(false);
       setEditId(null);
       setForm(emptyForm);
+      setFile(null);
+      setPreview(null);
       loadProducts();
     } catch (err: unknown) {
       toast.error(err instanceof Error ? err.message : 'Error');
@@ -73,8 +101,20 @@ export default function ProductosPage() {
   };
 
   const handleEdit = (p: Product) => {
-    setForm({ name: p.name, description: p.description || '', photoUrl: p.photoUrl || '', salePrice: p.salePrice, costPrice: p.costPrice, type: p.type, preparationMode: (p as any).preparationMode || 'VITRINA', dailyStock: p.dailyStock });
+    setForm({
+      name: p.name,
+      description: p.description || '',
+      photoUrl: p.photoUrl || '',
+      salePrice: p.salePrice,
+      costPrice: p.costPrice,
+      type: p.type,
+      preparationMode: (p as any).preparationMode || 'VITRINA',
+      dailyStock: p.dailyStock,
+      supplierId: p.supplierId || undefined,
+    });
     setEditId(p.id);
+    setFile(null);
+    setPreview(null);
     setShowForm(true);
   };
 
@@ -106,7 +146,7 @@ export default function ProductosPage() {
         {products.map((p) => (
           <div key={p.id} className="bg-white dark:bg-gray-800 rounded-2xl shadow-sm border border-gray-100 dark:border-gray-700 overflow-hidden">
             <div className="aspect-video relative bg-gray-100 dark:bg-gray-700">
-              {p.photoUrl ? <Image src={p.photoUrl} alt={p.name} fill className="object-cover" sizes="300px" /> : <div className="w-full h-full flex items-center justify-center text-gray-400"><Package size={40} /></div>}
+              {p.photoUrl ? <img src={p.photoUrl} alt={p.name} className="w-full h-full object-cover" /> : <div className="w-full h-full flex items-center justify-center text-gray-400"><Package size={40} /></div>}
             </div>
             <div className="p-4">
               <h3 className="font-bold text-sm truncate">{p.name}</h3>
@@ -134,15 +174,42 @@ export default function ProductosPage() {
             <form onSubmit={handleSubmit} className="space-y-3">
               <input type="text" placeholder="Nombre" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} className="w-full px-3 py-2 rounded-lg border border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 text-sm" required />
               <input type="text" placeholder="Descripción" value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} className="w-full px-3 py-2 rounded-lg border border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 text-sm" />
-              <input type="url" placeholder="URL de foto" value={form.photoUrl} onChange={(e) => setForm({ ...form, photoUrl: e.target.value })} className="w-full px-3 py-2 rounded-lg border border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 text-sm" />
+              <div className="space-y-2">
+                <label className="text-xs text-gray-500">Foto del producto</label>
+                <input type="file" accept="image/*" onChange={(e) => {
+                  const f = e.target.files?.[0] || null;
+                  setFile(f);
+                  if (f) {
+                    setPreview(URL.createObjectURL(f));
+                  } else {
+                    setPreview(null);
+                  }
+                }} className="w-full text-sm" />
+                {(preview || form.photoUrl) && (
+                  <div className="mt-2 rounded-lg overflow-hidden border border-gray-200 dark:border-gray-600">
+                    <img src={preview || form.photoUrl} alt="Vista previa" className="w-full h-32 object-cover" />
+                  </div>
+                )}
+              </div>
               <div className="grid grid-cols-2 gap-3">
                 <div><label className="text-xs text-gray-500">Precio venta</label><input type="number" value={form.salePrice} onChange={(e) => setForm({ ...form, salePrice: +e.target.value })} className="w-full px-3 py-2 rounded-lg border border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 text-sm" min="0" required /></div>
                 <div><label className="text-xs text-gray-500">Precio costo</label><input type="number" value={form.costPrice} onChange={(e) => setForm({ ...form, costPrice: +e.target.value })} className="w-full px-3 py-2 rounded-lg border border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 text-sm" min="0" required /></div>
               </div>
               <div className="grid grid-cols-2 gap-3">
-                <div><label className="text-xs text-gray-500">Tipo</label><select value={form.type} onChange={(e) => setForm({ ...form, type: e.target.value })} className="w-full px-3 py-2 rounded-lg border border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 text-sm"><option value="OWN">Propio</option><option value="SUPPLIER">Proveedor</option></select></div>
+                <div><label className="text-xs text-gray-500">Tipo</label><select value={form.type} onChange={(e) => setForm({ ...form, type: e.target.value, supplierId: e.target.value === 'OWN' ? undefined : form.supplierId })} className="w-full px-3 py-2 rounded-lg border border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 text-sm"><option value="OWN">Propio</option><option value="SUPPLIER">Proveedor</option></select></div>
                 <div><label className="text-xs text-gray-500">Stock diario</label><input type="number" value={form.dailyStock} onChange={(e) => setForm({ ...form, dailyStock: +e.target.value })} className="w-full px-3 py-2 rounded-lg border border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 text-sm" min="0" required /></div>
               </div>
+              {form.type === 'SUPPLIER' && (
+                <div>
+                  <label className="text-xs text-gray-500">Proveedor</label>
+                  <select value={form.supplierId || ''} onChange={(e) => setForm({ ...form, supplierId: e.target.value })} className="w-full px-3 py-2 rounded-lg border border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 text-sm" required>
+                    <option value="">Selecciona un proveedor</option>
+                    {suppliers.map((s) => (
+                      <option key={s.id} value={s.id}>{s.name}</option>
+                    ))}
+                  </select>
+                </div>
+              )}
               <div>
                 <label className="text-xs text-gray-500">Modo de preparación</label>
                 <select value={form.preparationMode} onChange={(e) => setForm({ ...form, preparationMode: e.target.value })} className="w-full px-3 py-2 rounded-lg border border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 text-sm">

@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { toast } from 'sonner';
-import Image from 'next/image';
+
 import { Plus, Minus, Trash2, ShoppingCart, Bike, CreditCard, ArrowRight } from 'lucide-react';
 import { formatCurrency } from '@/lib/utils';
 
@@ -14,6 +14,7 @@ interface Product {
   salePrice: number;
   photoUrl: string | null;
   remaining?: number;
+  preparationMode?: string;
 }
 
 interface DeliveryZone {
@@ -58,6 +59,14 @@ export default function DomicilioPage() {
   }, []);
 
   const addToCart = (p: Product) => {
+    const existing = cart.find((i) => i.productId === p.id);
+    const currentQty = existing ? existing.qty : 0;
+    if (p.preparationMode === 'VITRINA' && p.remaining !== undefined) {
+      if (currentQty + 1 > p.remaining) {
+        toast.error(`No hay suficiente stock de "${p.name}" en la vitrina (Disponible: ${p.remaining})`);
+        return;
+      }
+    }
     setCart((prev) => {
       const existing = prev.find((i) => i.productId === p.id);
       if (existing) {
@@ -71,6 +80,13 @@ export default function DomicilioPage() {
     if (qty <= 0) {
       setCart((prev) => prev.filter((i) => i.productId !== productId));
       return;
+    }
+    const prod = products.find((p) => p.id === productId);
+    if (prod && prod.preparationMode === 'VITRINA' && prod.remaining !== undefined) {
+      if (qty > prod.remaining) {
+        toast.error(`No hay suficiente stock de "${prod.name}" en la vitrina (Disponible: ${prod.remaining})`);
+        return;
+      }
     }
     setCart((prev) => prev.map((i) => (i.productId === productId ? { ...i, qty } : i)));
   };
@@ -88,6 +104,17 @@ export default function DomicilioPage() {
     if (!customerAddress.trim()) { toast.error('Ingresa tu dirección'); return; }
     if (!selectedZone) { toast.error('Selecciona una zona'); return; }
     if (cart.length === 0) { toast.error('Agrega productos'); return; }
+
+    // Validar stock para productos de vitrina
+    for (const item of cart) {
+      const prod = products.find((p) => p.id === item.productId);
+      if (prod && prod.preparationMode === 'VITRINA' && prod.remaining !== undefined) {
+        if (item.qty > prod.remaining) {
+          toast.error(`No hay suficiente stock de "${prod.name}" en la vitrina (Disponible: ${prod.remaining})`);
+          return;
+        }
+      }
+    }
 
     try {
       const base = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000';
@@ -147,7 +174,7 @@ export default function DomicilioPage() {
               >
                 <div className="aspect-square rounded-lg overflow-hidden mb-2 bg-gray-100 dark:bg-gray-700 relative">
                   {product.photoUrl ? (
-                    <Image src={product.photoUrl} alt={product.name} fill className="object-cover" sizes="150px" />
+                    <img src={product.photoUrl} alt={product.name} className="w-full h-full object-cover" />
                   ) : (
                     <div className="w-full h-full flex items-center justify-center text-xs text-gray-400">Sin imagen</div>
                   )}

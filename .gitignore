@@ -6,3 +6,6 @@ dist
 .turbo
 coverage
 .DS_Store
+backend-repo/
+frontend-repo/
+VamosDondeSalo.apk

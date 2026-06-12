@@ -36,6 +36,25 @@ class ApiClient {
     return res.json();
   }
 
+  async upload<T>(path: string, formData: FormData) {
+    const token = this.getToken();
+    const headers: Record<string, string> = {};
+    if (token) headers['Authorization'] = `Bearer ${token}`;
+
+    const res = await fetch(`${this.baseUrl}${path}`, {
+      method: 'POST',
+      body: formData,
+      headers,
+    });
+
+    if (!res.ok) {
+      const error = await res.json().catch(() => ({ message: 'Error del servidor' }));
+      throw new Error(error.message || `Error ${res.status}`);
+    }
+
+    return res.json() as Promise<T>;
+  }
+
   get<T>(path: string) {
     return this.request<T>(path);
   }

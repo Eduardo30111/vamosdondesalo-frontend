@@ -9,6 +9,7 @@ export default function ConfiguracionPage() {
   const [config, setConfig] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [logoFile, setLogoFile] = useState<File | null>(null);
 
   useEffect(() => {
     loadConfig();
@@ -28,6 +29,14 @@ export default function ConfiguracionPage() {
   const handleSave = async () => {
     setSaving(true);
     try {
+      // If a logo file was selected, upload it first
+      if (logoFile) {
+        const fd = new FormData();
+        fd.append('file', logoFile);
+        const up = await api.upload<{ url: string; publicId: string }>('/upload/product-image', fd);
+        config.business_logo_url = up.url;
+      }
+
       await api.put('/config', config);
       toast.success('Configuración guardada');
     } catch (err: unknown) {
@@ -104,10 +113,11 @@ export default function ConfiguracionPage() {
               />
             </div>
             <div>
-              <label className="block text-sm font-medium text-gray-600 dark:text-gray-400 mb-1">URL del logo</label>
+              <label className="block text-sm font-medium text-gray-600 dark:text-gray-400 mb-1">Logo del negocio</label>
+              <input type="file" accept="image/*" onChange={(e) => setLogoFile(e.target.files?.[0] || null)} className="mb-2" />
               <input
                 type="text"
-                placeholder="https://..."
+                placeholder="https://... (opcional)"
                 value={config.business_logo_url || ''}
                 onChange={(e) => setConfig({ ...config, business_logo_url: e.target.value })}
                 className="w-full px-4 py-2.5 rounded-xl border border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-700"

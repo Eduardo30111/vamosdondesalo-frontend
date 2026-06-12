@@ -30,4 +30,9 @@ export class CreateProductDto {
   @IsString()
   @IsOptional()
   supplierId?: string;
+
+  @IsNumber()
+  @Min(0)
+  @IsOptional()
+  dailyStock?: number;
 }

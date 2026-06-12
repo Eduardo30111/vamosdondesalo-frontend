@@ -14,7 +14,10 @@ export class AccountingService {
     const [sales, payments, expenses, wastes, monthlyExpenses] = await Promise.all([
       // Total sales (orders that are paid)
       this.prisma.order.aggregate({
-        where: { createdAt: { gte: startOfDay, lte: endOfDay }, status: 'PAID' },
+        where: {
+          createdAt: { gte: startOfDay, lte: endOfDay },
+          paymentStatus: { in: ['PAID', 'FIADO'] },
+        },
         _sum: { total: true },
         _count: true,
       }),
@@ -43,7 +46,7 @@ export class AccountingService {
 
     // Calculate supplier costs from sold items
     const orderItems = await this.prisma.orderItem.findMany({
-      where: { order: { createdAt: { gte: startOfDay, lte: endOfDay }, status: 'PAID' } },
+      where: { order: { createdAt: { gte: startOfDay, lte: endOfDay }, paymentStatus: { in: ['PAID', 'FIADO'] } } },
       include: { product: { select: { costPrice: true } } },
     });
 
@@ -81,7 +84,10 @@ export class AccountingService {
 
     const [sales, payments, dailyExpenses, monthlyExpenses, wastes] = await Promise.all([
       this.prisma.order.aggregate({
-        where: { createdAt: { gte: startOfMonth, lte: endOfMonth }, status: 'PAID' },
+        where: {
+          createdAt: { gte: startOfMonth, lte: endOfMonth },
+          paymentStatus: { in: ['PAID', 'FIADO'] },
+        },
         _sum: { total: true },
         _count: true,
       }),
@@ -105,7 +111,7 @@ export class AccountingService {
     ]);
 
     const orderItems = await this.prisma.orderItem.findMany({
-      where: { order: { createdAt: { gte: startOfMonth, lte: endOfMonth }, status: 'PAID' } },
+      where: { order: { createdAt: { gte: startOfMonth, lte: endOfMonth }, paymentStatus: { in: ['PAID', 'FIADO'] } } },
       include: { product: { select: { costPrice: true } } },
     });
 
@@ -133,7 +139,7 @@ export class AccountingService {
     };
   }
 
-  async closeCash(data: { date: string; actualCash: number }) {
+  async closeCash(data: { date: string; actualCash: number; note?: string; userId?: string }) {
     const report = await this.getDailyReport(new Date(data.date));
     const difference = data.actualCash - report.expectedCash;
 
@@ -143,7 +149,10 @@ export class AccountingService {
         expectedCash: report.expectedCash,
         actualCash: data.actualCash,
         difference,
+        note: data.note,
+        userId: data.userId,
       },
+      include: { user: { select: { name: true } } },
     });
   }
 
@@ -151,6 +160,7 @@ export class AccountingService {
     return this.prisma.cashClose.findMany({
       orderBy: { date: 'desc' },
       take: limit,
+      include: { user: { select: { name: true } } },
     });
   }
 }

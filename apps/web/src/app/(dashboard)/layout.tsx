@@ -9,7 +9,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     <AuthGuard>
       <div className="min-h-screen">
         <Sidebar />
-        <main className="lg:ml-64 min-h-screen p-4 lg:p-6">
+        <main className="lg:ml-64 min-h-screen pt-20 p-4 lg:pt-6 lg:p-6">
           {children}
         </main>
         <WhatsAppButton />

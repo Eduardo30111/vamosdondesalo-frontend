@@ -34,4 +34,9 @@ export class UpdateProductDto {
   @IsString()
   @IsOptional()
   supplierId?: string;
+
+  @IsNumber()
+  @Min(0)
+  @IsOptional()
+  dailyStock?: number;
 }

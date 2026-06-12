@@ -14,20 +14,21 @@ export class WastesService {
     }
     return this.prisma.waste.findMany({
       where,
-      include: { product: true },
+      include: { product: true, user: { select: { name: true } } },
       orderBy: { createdAt: 'desc' },
     });
   }
 
-  async create(data: { productId: string; qty: number; reason: string; userId: string }) {
+  async create(data: { productId: string; qty: number; reason: string; note?: string; userId: string }) {
     const waste = await this.prisma.waste.create({
       data: {
         productId: data.productId,
         qty: data.qty,
         reason: data.reason as any,
+        note: data.note,
         userId: data.userId,
       },
-      include: { product: true },
+      include: { product: true, user: { select: { name: true } } },
     });
 
     // Reduce vitrina stock if applicable

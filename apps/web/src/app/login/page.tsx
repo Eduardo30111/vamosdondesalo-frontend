@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { toast } from 'sonner';
 import { api } from '@/lib/api';
@@ -12,6 +12,17 @@ export default function LoginPage() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
+  const [remember, setRemember] = useState(false);
+
+  useEffect(() => {
+    const savedEmail = localStorage.getItem('salo_remember_email');
+    const savedPassword = localStorage.getItem('salo_remember_password');
+    if (savedEmail && savedPassword) {
+      setEmail(savedEmail);
+      setPassword(savedPassword);
+      setRemember(true);
+    }
+  }, []);
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -19,6 +30,13 @@ export default function LoginPage() {
     try {
       const res = await api.post<{ access_token: string; user: { id: string; name: string; email: string; role: string } }>('/auth/login', { email, password });
       setAuth(res.user, res.access_token);
+      if (remember) {
+        localStorage.setItem('salo_remember_email', email);
+        localStorage.setItem('salo_remember_password', password);
+      } else {
+        localStorage.removeItem('salo_remember_email');
+        localStorage.removeItem('salo_remember_password');
+      }
       toast.success(`Bienvenido, ${res.user.name}!`);
       switch (res.user.role) {
         case 'ADMIN':
@@ -57,6 +75,9 @@ export default function LoginPage() {
               </label>
               <input
                 type="email"
+                id="email"
+                name="email"
+                autoComplete="username"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 className="w-full px-4 py-3 rounded-xl border border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 focus:ring-2 focus:ring-salo-orange focus:border-transparent outline-none transition"
@@ -70,6 +91,9 @@ export default function LoginPage() {
               </label>
               <input
                 type="password"
+                id="password"
+                name="password"
+                autoComplete="current-password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 className="w-full px-4 py-3 rounded-xl border border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 focus:ring-2 focus:ring-salo-orange focus:border-transparent outline-none transition"
@@ -77,6 +101,21 @@ export default function LoginPage() {
                 required
               />
             </div>
+
+            <div className="flex items-center pb-2">
+              <label className="flex items-center space-x-2.5 cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  checked={remember}
+                  onChange={(e) => setRemember(e.target.checked)}
+                  className="h-4 w-4 rounded border-gray-300 dark:border-gray-600 text-salo-orange focus:ring-salo-orange focus:ring-offset-0 cursor-pointer accent-salo-orange bg-gray-50 dark:bg-gray-700"
+                />
+                <span className="text-sm text-gray-600 dark:text-gray-300">
+                  Recordar contraseña
+                </span>
+              </label>
+            </div>
+
             <button
               type="submit"
               disabled={loading}

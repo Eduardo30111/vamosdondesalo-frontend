@@ -59,6 +59,12 @@ export class OrdersController {
     return this.ordersService.fiar(id, body.customerId);
   }
 
+  @Put(':id/add-items')
+  @Roles('ADMIN', 'VENDEDOR')
+  addItems(@Param('id') id: string, @Body() body: { items: Array<{ productId: string; qty: number; notes?: string }> }) {
+    return this.ordersService.addItems(id, body.items);
+  }
+
   @Put(':id/pagar')
   @Roles('ADMIN', 'VENDEDOR')
   pagar(@Param('id') id: string) {

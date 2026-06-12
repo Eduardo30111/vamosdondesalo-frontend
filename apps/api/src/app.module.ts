@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { join } from 'path';
 import { PrismaModule } from './prisma/prisma.module';
 import { AuthModule } from './auth/auth.module';
 import { UsersModule } from './users/users.module';
@@ -19,6 +20,7 @@ import { AppConfigModule } from './app-config/app-config.module';
 import { UploadModule } from './upload/upload.module';
 import { HealthModule } from './health/health.module';
 import { ProductionOrdersModule } from './production-orders/production-orders.module';
+import { PreparedAuthorizationsModule } from './prepared-authorizations/prepared-authorizations.module';
 
 @Module({
   imports: [
@@ -35,6 +37,7 @@ import { ProductionOrdersModule } from './production-orders/production-orders.mo
     DashboardModule,
     DeliveryZonesModule,
     CustomersModule,
+    PreparedAuthorizationsModule,
     WastesModule,
     ExpensesModule,
     AccountingModule,

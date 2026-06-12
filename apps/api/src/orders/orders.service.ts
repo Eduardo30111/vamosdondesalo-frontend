@@ -3,6 +3,12 @@ import { PrismaService } from '../prisma/prisma.service';
 import { RealtimeGateway } from '../realtime/realtime.gateway';
 import { CreateOrderDto } from './dto/create-order.dto';
 
+function mapOrderLegacyStatus(order: any) {
+  if (!order) return order;
+  // Compatibilidad: la UI actual espera `order.status` como fulfillmentStatus.
+  return { ...order, status: order.fulfillmentStatus };
+}
+
 @Injectable()
 export class OrdersService {
   constructor(
@@ -11,9 +17,10 @@ export class OrdersService {
   ) {}
 
   async findAll(status?: string) {
-    const where = status ? { status: status as any } : {};
-    return this.prisma.order.findMany({
-      where,
+    const where = status ? { fulfillmentStatus: status as any } : {};
+    return this.prisma.order
+      .findMany({
+        where,
       include: {
         items: { include: { product: true } },
         table: true,
@@ -21,13 +28,15 @@ export class OrdersService {
         deliveryZone: true,
       },
       orderBy: { createdAt: 'desc' },
-    });
+    })
+      .then((orders) => orders.map(mapOrderLegacyStatus));
   }
 
   async findActive() {
     // Cuentas activas = pedidos NO pagados
-    return this.prisma.order.findMany({
-      where: { status: { in: ['PENDING', 'PREPARING', 'READY', 'DELIVERED'] } },
+    return this.prisma.order
+      .findMany({
+      where: { fulfillmentStatus: { in: ['PENDING', 'PREPARING', 'READY', 'DELIVERED'] } },
       include: {
         items: { include: { product: true } },
         table: true,
@@ -35,13 +44,18 @@ export class OrdersService {
         payments: true,
       },
       orderBy: { createdAt: 'asc' },
-    });
+    })
+      .then((orders) => orders.map(mapOrderLegacyStatus));
   }
 
   async findCuentasActivas() {
     // Pedidos entregados pero NO pagados → esperan cobro
-    return this.prisma.order.findMany({
-      where: { status: { in: ['DELIVERED', 'READY'] } },
+    return this.prisma.order
+      .findMany({
+      where: {
+        fulfillmentStatus: { in: ['DELIVERED', 'READY'] },
+        paymentStatus: 'UNPAID',
+      },
       include: {
         items: { include: { product: true } },
         table: true,
@@ -49,13 +63,15 @@ export class OrdersService {
         payments: true,
       },
       orderBy: { createdAt: 'desc' },
-    });
+    })
+      .then((orders) => orders.map(mapOrderLegacyStatus));
   }
 
   async findCocina() {
     // Solo pedidos PREPARADO que están en cocina
-    return this.prisma.order.findMany({
-      where: { status: { in: ['PENDING', 'PREPARING', 'READY'] } },
+    return this.prisma.order
+      .findMany({
+      where: { fulfillmentStatus: { in: ['PENDING', 'PREPARING', 'READY'] } },
       include: {
         items: {
           where: { isPrep: true },
@@ -65,22 +81,26 @@ export class OrdersService {
         deliveryZone: true,
       },
       orderBy: { createdAt: 'asc' },
-    });
+    })
+      .then((orders) => orders.map(mapOrderLegacyStatus));
   }
 
   async findDeliveries() {
-    return this.prisma.order.findMany({
-      where: { type: 'DELIVERY', status: { in: ['PENDING', 'PREPARING', 'READY', 'DELIVERED'] } },
+    return this.prisma.order
+      .findMany({
+      where: { type: 'DELIVERY', fulfillmentStatus: { in: ['PENDING', 'PREPARING', 'READY', 'IN_TRANSIT', 'DELIVERED'] } },
       include: {
         items: { include: { product: true } },
         deliveryZone: true,
       },
       orderBy: { createdAt: 'asc' },
-    });
+    })
+      .then((orders) => orders.map(mapOrderLegacyStatus));
   }
 
   async findOne(id: string) {
-    return this.prisma.order.findUniqueOrThrow({
+    return this.prisma.order
+      .findUniqueOrThrow({
       where: { id },
       include: {
         items: { include: { product: true } },
@@ -88,7 +108,8 @@ export class OrdersService {
         payments: true,
         deliveryZone: true,
       },
-    });
+    })
+      .then(mapOrderLegacyStatus);
   }
 
   async create(dto: CreateOrderDto) {
@@ -134,7 +155,10 @@ export class OrdersService {
 
     // Reglas VITRINA vs PREPARADO
     const hasPrepItem = items.some((item) => item.isPrep);
-    const initialStatus = hasPrepItem ? 'PENDING' : 'PAID';
+    // Vitrina-only orders are immediately READY (no kitchen needed), prep orders start as PENDING
+    const initialFulfillmentStatus = hasPrepItem ? 'PENDING' : 'READY';
+    // All orders start UNPAID — payment is registered separately via /payments or /orders/:id/fiar
+    const initialPaymentStatus = 'UNPAID';
 
     const order = await this.prisma.order.create({
       data: {
@@ -148,7 +172,8 @@ export class OrdersService {
         notes: dto.notes,
         total,
         trackingCode,
-        status: initialStatus as any,
+        fulfillmentStatus: initialFulfillmentStatus as any,
+        paymentStatus: initialPaymentStatus as any,
         items: { create: items },
       },
       include: {
@@ -175,23 +200,103 @@ export class OrdersService {
       this.realtime.emitOrderCreated(order);
     }
 
-    return order;
+    return mapOrderLegacyStatus(order);
+  }
+
+  async addItems(
+    id: string,
+    items: Array<{ productId: string; qty: number; notes?: string }>,
+  ) {
+    const products = await this.prisma.product.findMany({
+      where: { id: { in: items.map((i) => i.productId) } },
+      include: { vitrinaStock: true },
+    });
+
+    const productMap = new Map(products.map((p) => [p.id, p]));
+
+    const newItems = items.map((item) => {
+      const product = productMap.get(item.productId);
+      if (!product) throw new BadRequestException(`Producto ${item.productId} no encontrado`);
+      const unitPrice = product.salePrice;
+      return {
+        orderId: id,
+        productId: item.productId,
+        qty: item.qty,
+        unitPrice,
+        notes: item.notes,
+        isPrep: product.preparationMode === 'PREPARADO',
+      };
+    });
+
+    // Create the new items
+    await this.prisma.orderItem.createMany({ data: newItems });
+
+    // Recalculate total from ALL items (existing + new)
+    const allItems = await this.prisma.orderItem.findMany({ where: { orderId: id } });
+    const itemsTotal = allItems.reduce((sum, item) => sum + item.unitPrice * item.qty, 0);
+
+    // Fetch existing order to get deliveryFee and current fulfillmentStatus
+    const existing = await this.prisma.order.findUniqueOrThrow({ where: { id } });
+    const newTotal = itemsTotal + (existing.deliveryFee ?? 0);
+
+    // Determine if fulfillmentStatus needs to change
+    const hasPrepItem = newItems.some((item) => item.isPrep);
+    const fulfillmentUpdate: Record<string, any> = {};
+    if (hasPrepItem && existing.fulfillmentStatus === 'READY') {
+      fulfillmentUpdate.fulfillmentStatus = 'PREPARING';
+    }
+
+    const order = await this.prisma.order.update({
+      where: { id },
+      data: { total: newTotal, updatedAt: new Date(), ...fulfillmentUpdate },
+      include: {
+        items: { include: { product: true } },
+        table: true,
+        deliveryZone: true,
+        payments: true,
+      },
+    });
+
+    // Handle vitrina stock decrement for VITRINA items
+    const vitrinaItems = newItems.filter((item) => !item.isPrep);
+    for (const item of vitrinaItems) {
+      await this.prisma.vitrinaStock.updateMany({
+        where: { productId: item.productId },
+        data: { qty: { decrement: item.qty } },
+      });
+    }
+    if (vitrinaItems.length > 0) {
+      this.realtime.server.emit('vitrina:updated', { orderId: order.id });
+    }
+
+    // Emit to kitchen if there are prep items
+    if (hasPrepItem) {
+      this.realtime.emitOrderCreated(order);
+    }
+
+    return mapOrderLegacyStatus(order);
   }
 
   async fiar(id: string, customerId: string) {
-    return this.prisma.order.update({
+    const updated = await this.prisma.order.update({
       where: { id },
-      data: { status: 'PAID', isFiated: true, updatedAt: new Date() },
-      include: { items: { include: { product: true } } },
+      data: { paymentStatus: 'FIADO', isFiated: true, updatedAt: new Date() },
+      include: { items: { include: { product: true } }, table: true, deliveryZone: true },
     });
+    const legacy = mapOrderLegacyStatus(updated);
+    this.realtime.emitOrderStatusChanged(legacy);
+    return legacy;
   }
 
   async pagar(id: string) {
-    return this.prisma.order.update({
+    const updated = await this.prisma.order.update({
       where: { id },
-      data: { status: 'PAID', isFiated: false, updatedAt: new Date() },
-      include: { items: { include: { product: true } } },
+      data: { paymentStatus: 'PAID', isFiated: false, updatedAt: new Date() },
+      include: { items: { include: { product: true } }, table: true, deliveryZone: true },
     });
+    const legacy = mapOrderLegacyStatus(updated);
+    this.realtime.emitOrderStatusChanged(legacy);
+    return legacy;
   }
 
   async cancelar(id: string) {
@@ -210,15 +315,15 @@ export class OrdersService {
     
     return this.prisma.order.update({
       where: { id },
-      data: { status: 'CANCELLED', updatedAt: new Date() },
+      data: { fulfillmentStatus: 'CANCELLED', paymentStatus: 'CANCELLED', updatedAt: new Date() },
       include: { items: { include: { product: true } } },
-    });
+    }).then(mapOrderLegacyStatus);
   }
 
   async updateStatus(id: string, status: string) {
     const order = await this.prisma.order.update({
       where: { id },
-      data: { status: status as any },
+      data: { fulfillmentStatus: status as any },
       include: {
         items: { include: { product: true } },
         table: true,
@@ -226,7 +331,23 @@ export class OrdersService {
       },
     });
 
-    this.realtime.emitOrderStatusChanged(order);
-    return order;
+    let updatedOrder = order;
+
+    // If a delivery order is marked READY in cocina, move it immediately to IN_TRANSIT
+    if (status === 'READY' && order.type === 'DELIVERY') {
+      updatedOrder = await this.prisma.order.update({
+        where: { id },
+        data: { fulfillmentStatus: 'IN_TRANSIT' },
+        include: {
+          items: { include: { product: true } },
+          table: true,
+          deliveryZone: true,
+        },
+      });
+    }
+
+    const legacy = mapOrderLegacyStatus(updatedOrder);
+    this.realtime.emitOrderStatusChanged(legacy);
+    return legacy;
   }
 }

@@ -76,16 +76,33 @@ export class PublicController {
   }
 
   private async getAvailableProducts() {
-    const products = await this.prisma.product.findMany({
-      where: { active: true, preparationMode: 'VITRINA' },
-      include: { vitrinaStock: true },
-      orderBy: { name: 'asc' },
-    });
-    return products
+    const now = new Date();
+    const date = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+
+    const [vitrinaProducts, authorizedPrepared] = await Promise.all([
+      this.prisma.product.findMany({
+        where: { active: true, preparationMode: 'VITRINA' },
+        include: { vitrinaStock: true },
+        orderBy: { name: 'asc' },
+      }),
+      this.prisma.preparedAuthorization.findMany({
+        where: { date },
+        include: { product: true },
+      }),
+    ]);
+
+    const visibleVitrina = vitrinaProducts
       .map((p) => {
         const qty = p.vitrinaStock?.qty ?? 0;
         return { ...p, remaining: qty, hasStock: qty > 0 };
       })
       .filter((p) => p.hasStock);
+
+    const visiblePrepared = authorizedPrepared
+      .map((auth) => auth.product)
+      .filter((product) => product.active)
+      .sort((a, b) => a.name.localeCompare(b.name));
+
+    return [...visibleVitrina, ...visiblePrepared];
   }
 }

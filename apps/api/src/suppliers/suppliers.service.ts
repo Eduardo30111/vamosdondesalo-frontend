@@ -27,33 +27,22 @@ export class SuppliersService {
       where: { supplierId: id },
     });
 
-    const productIds = products.map(p => p.id);
-
-    // Find all order items for those products in paid orders within date range
-    const orderItems = await this.prisma.orderItem.findMany({
-      where: {
-        productId: { in: productIds },
-        order: {
-          status: 'PAID',
-          createdAt: { gte: from, lte: to },
-        },
-      },
-      include: { product: { select: { id: true, name: true, costPrice: true, salePrice: true } } },
-    });
-
-    // Group by product
+    // Group by product using received minus returned quantities
     const productSummary = products.map(product => {
-      const items = orderItems.filter(item => item.productId === product.id);
-      const qtySold = items.reduce((sum, item) => sum + item.qty, 0);
-      const totalPayable = qtySold * product.costPrice;
+      const received = product.supplierReceivedQty ?? 0;
+      const returned = product.supplierReturnedQty ?? 0;
+      const net = received - returned;
+      const totalPayable = net * product.costPrice;
       return {
         productId: product.id,
         productName: product.name,
         costPrice: product.costPrice,
-        qtySold,
+        receivedQty: received,
+        returnedQty: returned,
+        netQty: net,
         totalPayable,
       };
-    }).filter(p => p.qtySold > 0);
+    });
 
     const totalPayable = productSummary.reduce((sum, p) => sum + p.totalPayable, 0);
 

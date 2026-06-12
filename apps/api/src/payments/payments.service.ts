@@ -1,9 +1,10 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { RealtimeGateway } from '../realtime/realtime.gateway';
 
 @Injectable()
 export class PaymentsService {
-  constructor(private prisma: PrismaService) {}
+  constructor(private prisma: PrismaService, private realtime: RealtimeGateway) {}
 
   async createPayment(data: { orderId: string; method: string; amount: number }) {
     const payment = await this.prisma.payment.create({
@@ -14,12 +15,16 @@ export class PaymentsService {
       },
     });
 
-    const order = await this.prisma.order.findUnique({ where: { id: data.orderId } });
-    if (order && order.type !== 'DELIVERY') {
-      await this.prisma.order.update({
+    // If the order exists, mark it as PAID and emit update
+    const order = await this.prisma.order.findUnique({ where: { id: data.orderId }, include: { items: { include: { product: true } }, table: true, deliveryZone: true } });
+    if (order) {
+      const updated = await this.prisma.order.update({
         where: { id: data.orderId },
-        data: { status: 'PAID' },
+        data: { paymentStatus: 'PAID', isFiated: false },
+        include: { items: { include: { product: true } }, table: true, deliveryZone: true },
       });
+      // Emit realtime update for order
+      this.realtime.emitOrderStatusChanged(updated);
     }
 
     return payment;
@@ -31,12 +36,14 @@ export class PaymentsService {
       data: {},
     });
 
-    const order = await this.prisma.order.findUnique({ where: { id: payment.orderId } });
+    const order = await this.prisma.order.findUnique({ where: { id: payment.orderId }, include: { items: { include: { product: true } }, table: true, deliveryZone: true } });
     if (order && order.type !== 'DELIVERY') {
-      await this.prisma.order.update({
+      const updated = await this.prisma.order.update({
         where: { id: payment.orderId },
-        data: { status: 'PAID' },
+        data: { paymentStatus: 'PAID', isFiated: false },
+        include: { items: { include: { product: true } }, table: true, deliveryZone: true },
       });
+      this.realtime.emitOrderStatusChanged(updated);
     }
 
     return payment;

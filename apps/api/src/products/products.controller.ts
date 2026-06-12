@@ -35,6 +35,18 @@ export class ProductsController {
     return this.productsService.update(id, dto);
   }
 
+  @Put(':id/receive-supplier')
+  @Roles('ADMIN')
+  receiveSupplierStock(@Param('id') id: string, @Body('qty') qty: number) {
+    return this.productsService.receiveSupplierStock(id, qty);
+  }
+
+  @Put(':id/return-supplier')
+  @Roles('ADMIN')
+  returnSupplierStock(@Param('id') id: string, @Body('qty') qty: number) {
+    return this.productsService.returnSupplierStock(id, qty);
+  }
+
   @Delete(':id')
   @Roles('ADMIN')
   delete(@Param('id') id: string) {

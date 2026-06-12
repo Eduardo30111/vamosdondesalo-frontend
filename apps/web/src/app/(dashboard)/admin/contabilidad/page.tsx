@@ -42,7 +42,7 @@ interface CashCloseRecord {
   actualCash: number;
   difference: number;
   note: string | null;
-  user: { name: string };
+  user: { name: string } | null;
 }
 
 type Tab = 'daily' | 'monthly' | 'cashclose';
@@ -266,7 +266,7 @@ export default function ContabilidadPage() {
                         {cc.difference >= 0 ? '+' : ''}{formatCurrency(cc.difference)}
                       </td>
                       <td className="p-3 text-gray-500">{cc.note || '-'}</td>
-                      <td className="p-3 text-gray-500">{cc.user.name}</td>
+                      <td className="p-3 text-gray-500">{cc.user?.name || '-'}</td>
                     </tr>
                   ))}
                   {cashCloses.length === 0 && (

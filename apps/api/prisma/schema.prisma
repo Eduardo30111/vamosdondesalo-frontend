@@ -23,8 +23,16 @@ enum OrderStatus {
   PENDING
   PREPARING
   READY
+  IN_TRANSIT
   DELIVERED
   PAID
+  CANCELLED
+}
+
+enum PaymentStatus {
+  UNPAID
+  PAID
+  FIADO
   CANCELLED
 }
 
@@ -41,27 +49,35 @@ model User {
   role         UserRole
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
+
+  preparedAuthorizations PreparedAuthorization[]
+  wastes                 Waste[]
+  cashCloses             CashClose[]
 }
 
 model Product {
-  id              String          @id @default(dbgenerated("gen_random_uuid()"))
-  name            String
-  description     String?
-  photoUrl        String?
-  salePrice       Float
-  costPrice       Float
-  type            String          // OWN | SUPPLIER
-  preparationMode PreparationMode @default(VITRINA)
-  active          Boolean         @default(true)
-  createdAt       DateTime        @default(now())
-  updatedAt       DateTime        @updatedAt
+  id                    String                    @id @default(dbgenerated("gen_random_uuid()"))
+  name                  String
+  description           String?
+  photoUrl              String?
+  salePrice             Float
+  costPrice             Float
+  type                  String                    // OWN | SUPPLIER
+  preparationMode       PreparationMode           @default(VITRINA)
+  active                Boolean                   @default(true)
+  dailyStock            Int                       @default(0)
+  createdAt             DateTime                  @default(now())
+  updatedAt             DateTime                  @updatedAt
 
-  supplierId       String?
-  supplier         Supplier?        @relation(fields: [supplierId], references: [id])
-  vitrinaStock     VitrinaStock?
-  productionOrders ProductionOrder[]
-  orderItems       OrderItem[]
-  wastes           Waste[]
+  supplierId            String?
+  supplierReceivedQty   Int                       @default(0)
+  supplierReturnedQty   Int                       @default(0)
+  supplier              Supplier?                 @relation(fields: [supplierId], references: [id])
+  vitrinaStock          VitrinaStock?
+  productionOrders      ProductionOrder[]
+  orderItems            OrderItem[]
+  wastes                Waste[]
+  preparedAuthorizations PreparedAuthorization[]
 }
 
 model VitrinaStock {
@@ -106,7 +122,10 @@ model Order {
   customerAddress String?
   deliveryZoneId  String?
   deliveryFee     Float       @default(0)
-  status          OrderStatus @default(PAID)
+  // fulfillmentStatus conserva los valores del enum OrderStatus existentes (PENDING->...->DELIVERED, etc)
+  // Se mapea a la columna histórica `status` para evitar una migración destructiva.
+  fulfillmentStatus OrderStatus @default(PAID) @map("status")
+  paymentStatus     PaymentStatus @default(UNPAID)
   isFiated        Boolean     @default(false)
   notes           String?
   total           Float
@@ -194,6 +213,10 @@ model CashClose {
   expectedCash Float
   actualCash   Float
   difference   Float
+  note         String?
+  userId       String?
+  createdAt    DateTime @default(now())
+  user         User?    @relation(fields: [userId], references: [id])
 }
 
 model Waste {
@@ -201,7 +224,23 @@ model Waste {
   productId String
   qty       Int
   reason    String
+  note      String?
   userId    String
   createdAt DateTime @default(now())
   product   Product  @relation(fields: [productId], references: [id])
+  user      User     @relation(fields: [userId], references: [id])
+}
+
+model PreparedAuthorization {
+  id        String   @id @default(dbgenerated("gen_random_uuid()"))
+  productId String
+  userId    String?
+  date      String
+  createdAt DateTime @default(now())
+
+  product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+  user    User?   @relation(fields: [userId], references: [id])
+
+  @@unique([productId, date])
+  @@map("autorizar_preparados")
 }
