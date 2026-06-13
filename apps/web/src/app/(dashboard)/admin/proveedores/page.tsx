@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import { toast } from 'sonner';
 import { api } from '@/lib/api';
-import { formatCurrency } from '@/lib/utils';
+import { formatCurrency, toLocalDateInputValue } from '@/lib/utils';
 import { Truck, Calendar, Plus, Pencil, Trash2, X, ChevronDown, ChevronUp, PackageOpen, MinusCircle, PlusCircle } from 'lucide-react';
 
 interface Product {
@@ -59,9 +59,9 @@ export default function ProveedoresPage() {
   const [dateFrom, setDateFrom] = useState(() => {
     const d = new Date();
     d.setDate(1);
-    return d.toISOString().split('T')[0];
+    return toLocalDateInputValue(d);
   });
-  const [dateTo, setDateTo] = useState(new Date().toISOString().split('T')[0]);
+  const [dateTo, setDateTo] = useState(() => toLocalDateInputValue(new Date()));
 
   useEffect(() => {
     loadSuppliers();

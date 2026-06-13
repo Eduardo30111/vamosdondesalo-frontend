@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import { toast } from 'sonner';
 import { api } from '@/lib/api';
-import { formatCurrency } from '@/lib/utils';
+import { formatCurrency, formatLocalDate, toLocalDateInputValue } from '@/lib/utils';
 import { CreditCard, AlertTriangle, Search, X, Plus, Edit2, Trash2 } from 'lucide-react';
 
 interface Credit {
@@ -46,7 +46,7 @@ export default function FiadosPage() {
   const [customProductNote, setCustomProductNote] = useState('');
   const [productPrice, setProductPrice] = useState('');
   const [productQty, setProductQty] = useState(1);
-  const [chargeDate, setChargeDate] = useState(() => new Date().toISOString().split('T')[0]);
+  const [chargeDate, setChargeDate] = useState(() => toLocalDateInputValue(new Date()));
 
   // States for Edit / Delete features
   const [isSaving, setIsSaving] = useState(false);
@@ -222,7 +222,7 @@ export default function FiadosPage() {
             setCustomProductNote('');
             setProductPrice('');
             setProductQty(1);
-            setChargeDate(new Date().toISOString().split('T')[0]);
+            setChargeDate(toLocalDateInputValue(new Date()));
           }}
           className="px-4 py-2 bg-salo-orange text-white rounded-xl font-medium text-sm hover:opacity-90 transition flex items-center gap-1.5 shadow-sm font-sans"
         >
@@ -319,14 +319,14 @@ export default function FiadosPage() {
                     </span>
                     <div className="flex items-center gap-2">
                       <span className="text-xs text-gray-400">
-                        {new Date(credit.createdAt).toLocaleDateString('es-CO')}
+                        {formatLocalDate(credit.createdAt)}
                       </span>
                       <button
                         onClick={() => {
                           setEditingCredit(credit);
                           setEditAmount(credit.amount.toString());
                           setEditNote(credit.note || '');
-                          setEditDate(new Date(credit.createdAt).toISOString().split('T')[0]);
+                          setEditDate(toLocalDateInputValue(credit.createdAt));
                         }}
                         className="text-gray-400 hover:text-blue-600 dark:hover:text-blue-400 transition"
                       >

@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import { toast } from 'sonner';
 import { api } from '@/lib/api';
-import { formatCurrency } from '@/lib/utils';
+import { formatCurrency, formatLocalDate, toLocalDateInputValue } from '@/lib/utils';
 import { Calculator, Calendar, TrendingUp, TrendingDown, DollarSign, X } from 'lucide-react';
 
 interface DailyReport {
@@ -53,7 +53,7 @@ export default function ContabilidadPage() {
   const [monthlyReport, setMonthlyReport] = useState<MonthlyReport | null>(null);
   const [cashCloses, setCashCloses] = useState<CashCloseRecord[]>([]);
   const [loading, setLoading] = useState(true);
-  const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0]);
+  const [selectedDate, setSelectedDate] = useState(toLocalDateInputValue(new Date()));
   const [selectedMonth, setSelectedMonth] = useState(`${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, '0')}`);
   const [showCashClose, setShowCashClose] = useState(false);
   const [actualCash, setActualCash] = useState('');
@@ -259,7 +259,7 @@ export default function ContabilidadPage() {
                 <tbody className="divide-y divide-gray-100 dark:divide-gray-700">
                   {cashCloses.map((cc) => (
                     <tr key={cc.id}>
-                      <td className="p-3">{new Date(cc.date).toLocaleDateString('es-CO')}</td>
+                      <td className="p-3">{formatLocalDate(cc.date)}</td>
                       <td className="p-3">{formatCurrency(cc.expectedCash)}</td>
                       <td className="p-3">{formatCurrency(cc.actualCash)}</td>
                       <td className={`p-3 font-bold ${cc.difference >= 0 ? 'text-green-500' : 'text-red-500'}`}>

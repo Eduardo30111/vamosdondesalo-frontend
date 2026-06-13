@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import { toast } from 'sonner';
 import { api } from '@/lib/api';
-import { formatCurrency } from '@/lib/utils';
+import { formatCurrency, formatLocalDate, toLocalDateInputValue } from '@/lib/utils';
 import { Receipt, Plus, X, Pencil, Trash2 } from 'lucide-react';
 
 interface Expense {
@@ -22,7 +22,7 @@ export default function GastosPage() {
   const [showForm, setShowForm] = useState(false);
   const [editId, setEditId] = useState<string | null>(null);
   const [filter, setFilter] = useState<'ALL' | 'DAILY' | 'MONTHLY'>('ALL');
-  const [form, setForm] = useState({ category: '', description: '', amount: '', type: 'DAILY', date: new Date().toISOString().split('T')[0] });
+  const [form, setForm] = useState({ category: '', description: '', amount: '', type: 'DAILY', date: toLocalDateInputValue(new Date()) });
 
   useEffect(() => {
     loadExpenses();
@@ -54,7 +54,7 @@ export default function GastosPage() {
       }
       setShowForm(false);
       setEditId(null);
-      setForm({ category: '', description: '', amount: '', type: 'DAILY', date: new Date().toISOString().split('T')[0] });
+      setForm({ category: '', description: '', amount: '', type: 'DAILY', date: toLocalDateInputValue(new Date()) });
       loadExpenses();
     } catch (err: unknown) {
       toast.error(err instanceof Error ? err.message : 'Error guardando gasto');
@@ -68,7 +68,7 @@ export default function GastosPage() {
       description: expense.description,
       amount: String(expense.amount),
       type: expense.type,
-      date: new Date(expense.date).toISOString().split('T')[0],
+      date: toLocalDateInputValue(expense.date),
     });
     setShowForm(true);
   };
@@ -104,7 +104,7 @@ export default function GastosPage() {
           Gastos
         </h1>
         <button
-          onClick={() => { setEditId(null); setForm({ category: '', description: '', amount: '', type: 'DAILY', date: new Date().toISOString().split('T')[0] }); setShowForm(true); }}
+          onClick={() => { setEditId(null); setForm({ category: '', description: '', amount: '', type: 'DAILY', date: toLocalDateInputValue(new Date()) }); setShowForm(true); }}
           className="px-4 py-2.5 bg-salo-orange text-white rounded-xl font-medium text-sm hover:bg-primary-700 transition flex items-center gap-2"
         >
           <Plus size={16} />
@@ -162,7 +162,7 @@ export default function GastosPage() {
                   </span>
                 </td>
                 <td className="p-3 font-bold text-red-500">{formatCurrency(expense.amount)}</td>
-                <td className="p-3 text-gray-500">{new Date(expense.date).toLocaleDateString('es-CO')}</td>
+                <td className="p-3 text-gray-500">{formatLocalDate(expense.date)}</td>
                 <td className="p-3">
                   <div className="flex gap-1">
                     <button onClick={() => handleEdit(expense)} className="p-1.5 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg">
