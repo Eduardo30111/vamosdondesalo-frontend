@@ -40,7 +40,7 @@ async function main() {
       category: 'RESTAURANT',
       plan: 'PRO',
       planExpiresAt: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000), // 1 año
-      commissionRate: 0.04,
+      commissionRate: 0.0,
       balance: 100000.0, // Saldo inicial
       ownerId: admin.id,
     },

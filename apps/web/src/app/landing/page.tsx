@@ -335,12 +335,16 @@ export default function LandingPage() {
 
   // Filter products for the selected store
   const storeProducts = products.filter((p) => {
-    const matchesStore = selectedStore
-      ? (selectedStore.id === 'legacy-salo' ? (!p.storeId || p.storeId === selectedStore.id) : p.storeId === selectedStore.id)
-      : true;
+    if (!selectedStore) return true;
+    const isDefaultSelected = selectedStore.name.toLowerCase().includes('donde salo') || selectedStore.id === 'legacy-salo';
+    if (isDefaultSelected) {
+      return !p.storeId || p.storeId === selectedStore.id || (defaultStore && p.storeId === defaultStore.id);
+    }
+    return p.storeId === selectedStore.id;
+  }).filter((p) => {
     const matchesSearch = p.name.toLowerCase().includes(searchProductQuery.toLowerCase()) || 
                           (p.description && p.description.toLowerCase().includes(searchProductQuery.toLowerCase()));
-    return matchesStore && matchesSearch;
+    return matchesSearch;
   });
 
   const getCategoryLabel = (category: string) => {
@@ -463,8 +467,13 @@ export default function LandingPage() {
             {/* Showcase Fritos Donde Salo! */}
             {defaultStore && (
               <section className="py-10 px-4 max-w-6xl mx-auto">
-                <div className="bg-gradient-to-r from-orange-500 to-amber-500 rounded-3xl p-6 md:p-8 text-white shadow-xl flex flex-col md:flex-row items-center justify-between gap-6 hover:shadow-2xl transition duration-300">
-                  <div className="space-y-3 text-center md:text-left">
+                <div className="bg-gradient-to-r from-orange-500 to-amber-500 rounded-3xl p-6 md:p-8 text-white shadow-xl flex flex-col md:flex-row items-center justify-between gap-6 hover:shadow-2xl transition duration-300 relative overflow-hidden">
+                  <img 
+                    src="/logo.jpg" 
+                    alt="" 
+                    className="absolute inset-0 w-full h-full object-cover opacity-15 mix-blend-overlay pointer-events-none" 
+                  />
+                  <div className="space-y-3 text-center md:text-left relative z-10">
                     <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-white/20 text-white uppercase tracking-wider">
                       ★ Tienda Destacada Original
                     </div>
@@ -478,7 +487,7 @@ export default function LandingPage() {
                       ...defaultStore,
                       id: defaultStore.id || 'legacy-salo'
                     })}
-                    className="px-6 py-4 bg-white text-orange-600 font-extrabold rounded-2xl hover:bg-orange-50 active:scale-95 transition shadow-md w-full md:w-auto text-center shrink-0"
+                    className="px-6 py-4 bg-white text-orange-600 font-extrabold rounded-2xl hover:bg-orange-50 active:scale-95 transition shadow-md w-full md:w-auto text-center shrink-0 relative z-10"
                   >
                     ¡Entrar a la tienda original aquí!
                   </button>

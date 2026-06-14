@@ -1,9 +1,21 @@
-import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException, OnModuleInit } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 
 @Injectable()
-export class StoresService {
+export class StoresService implements OnModuleInit {
   constructor(private prisma: PrismaService) {}
+
+  async onModuleInit() {
+    try {
+      await this.prisma.store.updateMany({
+        where: { name: 'Donde Salo!' },
+        data: { commissionRate: 0.0 },
+      });
+      console.log('✅ Default store Donde Salo! commission rate set to 0%');
+    } catch (e) {
+      // ignore
+    }
+  }
 
   async findAllActive() {
     return this.prisma.store.findMany({
