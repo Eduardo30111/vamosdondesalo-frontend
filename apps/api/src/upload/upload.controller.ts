@@ -4,6 +4,7 @@ import {
   UseInterceptors,
   UploadedFile,
   UseGuards,
+  Request,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { UploadService } from './upload.service';
@@ -17,14 +18,14 @@ export class UploadController {
   constructor(private readonly uploadService: UploadService) {}
 
   @Post('product-image')
-  @Roles('ADMIN')
+  @Roles('ADMIN', 'MERCHANT')
   @UseInterceptors(FileInterceptor('file', {
     limits: { fileSize: 5 * 1024 * 1024 },
   }))
-  async uploadImage(@UploadedFile() file: any) {
+  async uploadImage(@UploadedFile() file: any, @Request() req: any) {
     if (!file) {
       return { error: 'No se proporcionó archivo' };
     }
-    return this.uploadService.uploadImage(file);
+    return this.uploadService.uploadImage(file, req);
   }
 }

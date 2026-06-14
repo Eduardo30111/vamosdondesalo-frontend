@@ -155,8 +155,8 @@ export default function AdminStoresPage() {
         <p className="text-sm text-gray-500">Supervisa planes, aprueba comercios y administra saldos del marketplace</p>
       </div>
 
-      <div className="bg-white dark:bg-gray-800/60 border border-gray-150/40 dark:border-gray-700/60 rounded-3xl overflow-hidden shadow-sm">
-        <table className="w-full text-left border-collapse">
+      <div className="bg-white dark:bg-gray-800/60 border border-gray-150/40 dark:border-gray-700/60 rounded-3xl overflow-x-auto shadow-sm">
+        <table className="w-full text-left border-collapse min-w-[800px]">
           <thead>
             <tr className="bg-gray-50 dark:bg-gray-750 text-gray-500 dark:text-gray-400 font-extrabold text-xs uppercase tracking-wider border-b border-gray-150 dark:border-gray-700">
               <th className="py-4 px-6">Tienda / Propietario</th>

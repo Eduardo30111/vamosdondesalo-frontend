@@ -251,7 +251,7 @@ export default function ProveedoresPage() {
               {isExpanded && (
                 <div className="border-t border-gray-100 dark:border-gray-700 p-5 bg-gray-50/50 dark:bg-gray-800/20">
                   <div className="overflow-x-auto">
-                    <table className="w-full text-sm">
+                    <table className="w-full text-sm min-w-[600px]">
                       <thead>
                         <tr className="text-gray-400 text-xs border-b border-gray-200 dark:border-gray-700 pb-2">
                           <th className="text-left pb-3 font-semibold">Producto</th>

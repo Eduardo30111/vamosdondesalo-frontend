@@ -31,7 +31,7 @@ export class UploadService {
     }
   }
 
-  async uploadImage(file: { mimetype: string; size: number; buffer: Buffer }): Promise<{ url: string; publicId: string }> {
+  async uploadImage(file: { mimetype: string; size: number; buffer: Buffer }, req?: any): Promise<{ url: string; publicId: string }> {
     const allowedMimes = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
     if (!allowedMimes.includes(file.mimetype)) {
       throw new BadRequestException(`Tipo de archivo no permitido: ${file.mimetype}. Usa: ${allowedMimes.join(', ')}`);
@@ -49,7 +49,16 @@ export class UploadService {
       const relPath = join('products', filename);
       const fullPath = join(process.cwd(), 'uploads', relPath);
       await fs.writeFile(fullPath, file.buffer);
-      const apiBase = process.env.API_URL || `http://localhost:${process.env.API_PORT || 4000}`;
+      
+      let apiBase = process.env.API_URL;
+      if (!apiBase && req) {
+        const protocol = req.headers['x-forwarded-proto'] || 'http';
+        apiBase = `${protocol}://${req.headers.host}`;
+      }
+      if (!apiBase) {
+        apiBase = `http://localhost:${process.env.API_PORT || 4000}`;
+      }
+
       const url = `${apiBase}/uploads/${relPath.replace(/\\/g, '/')}`;
       return { url, publicId: filename };
     }

@@ -51,6 +51,7 @@ export class TablesController {
   async downloadQr(
     @Param('id') id: string,
     @Query('format') format: string,
+    @Query('frontendUrl') frontendUrl: string,
     @Res() res: Response,
   ) {
     const table = await this.tablesService.findById(id);
@@ -58,7 +59,8 @@ export class TablesController {
       res.status(404).json({ message: 'Mesa no encontrada' });
       return;
     }
-    const url = `${process.env.PUBLIC_URL || 'http://192.168.80.17:3000'}/mesa/${table.qrToken}`;
+    const base = frontendUrl || process.env.PUBLIC_URL || 'http://localhost:3000';
+    const url = `${base}/mesa/${table.qrToken}`;
 
     if (format === 'pdf') {
       const html = `

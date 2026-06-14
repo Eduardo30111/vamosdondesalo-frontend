@@ -107,8 +107,8 @@ export default function MermasPage() {
         <p className="text-2xl font-bold text-red-500">{formatCurrency(totalCost)}</p>
       </div>
 
-      <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-sm border border-gray-100 dark:border-gray-700 overflow-hidden">
-        <table className="w-full text-sm">
+      <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-sm border border-gray-100 dark:border-gray-700 overflow-x-auto">
+        <table className="w-full text-sm min-w-[650px]">
           <thead className="bg-gray-50 dark:bg-gray-700">
             <tr>
               <th className="text-left p-3 font-medium">Producto</th>

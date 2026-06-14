@@ -43,6 +43,8 @@ export default function MerchantProductsPage() {
   const [loading, setLoading] = useState(true);
   const [showModal, setShowModal] = useState(false);
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
+  const [file, setFile] = useState<File | null>(null);
+  const [preview, setPreview] = useState<string | null>(null);
 
   // Form state
   const [formData, setFormData] = useState({
@@ -85,6 +87,8 @@ export default function MerchantProductsPage() {
       photoUrl: '',
       active: true,
     });
+    setFile(null);
+    setPreview(null);
     setShowModal(true);
   };
 
@@ -101,6 +105,8 @@ export default function MerchantProductsPage() {
       photoUrl: prod.photoUrl || '',
       active: prod.active,
     });
+    setFile(null);
+    setPreview(null);
     setShowModal(true);
   };
 
@@ -142,7 +148,17 @@ export default function MerchantProductsPage() {
 
     // Default image if empty
     let finalPhoto = formData.photoUrl.trim();
-    if (!finalPhoto) {
+    if (file) {
+      try {
+        const fd = new FormData();
+        fd.append('file', file);
+        const up = await api.upload<{ url: string; publicId: string }>('/upload/product-image', fd);
+        finalPhoto = up.url;
+      } catch (err: any) {
+        toast.error('Error al subir la imagen');
+        return;
+      }
+    } else if (!finalPhoto) {
       finalPhoto = 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?w=400';
     }
 
@@ -337,12 +353,35 @@ export default function MerchantProductsPage() {
               )}
 
               <div>
-                <label className="block text-xs font-extrabold uppercase text-gray-400 tracking-wider mb-1">URL Foto de Producto</label>
+                <label className="block text-xs font-extrabold uppercase text-gray-400 tracking-wider mb-1">Cargar Foto de Producto</label>
+                <input
+                  type="file"
+                  accept="image/*"
+                  onChange={(e) => {
+                    const f = e.target.files?.[0] || null;
+                    setFile(f);
+                    if (f) {
+                      setPreview(URL.createObjectURL(f));
+                    } else {
+                      setPreview(null);
+                    }
+                  }}
+                  className="w-full text-sm mb-2"
+                />
+                {(preview || formData.photoUrl) && (
+                  <div className="mt-2 rounded-xl overflow-hidden border border-gray-200 dark:border-gray-700">
+                    <img src={preview || formData.photoUrl} alt="Vista previa" className="w-full h-32 object-cover" />
+                  </div>
+                )}
+              </div>
+
+              <div>
+                <label className="block text-xs font-extrabold uppercase text-gray-400 tracking-wider mb-1">O URL de Foto</label>
                 <div className="relative">
                   <ImageIcon size={18} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-gray-400" />
                   <input
                     type="text"
-                    placeholder="Dejar en blanco para usar por defecto"
+                    placeholder="O ingresa un enlace externo"
                     value={formData.photoUrl}
                     onChange={(e) => setFormData({ ...formData, photoUrl: e.target.value })}
                     className="w-full pl-11 pr-4 py-3 rounded-xl border border-gray-200 dark:border-gray-750 bg-gray-50 dark:bg-gray-750 text-sm outline-none focus:ring-2 focus:ring-orange-400 transition"
