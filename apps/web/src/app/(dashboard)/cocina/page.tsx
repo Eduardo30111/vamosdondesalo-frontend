@@ -60,9 +60,7 @@ export default function CocinaPage() {
   const { user } = useAuthStore() as any;
   const [orders, setOrders] = useState<Order[]>([]);
   const [productions, setProductions] = useState<ProductionOrder[]>([]);
-  const [preparedProducts, setPreparedProducts] = useState<PreparedProduct[]>([]);
   const [loading, setLoading] = useState(true);
-  const [loadingPrepared, setLoadingPrepared] = useState(true);
 
   // Quick action modal for production orders
   const [selectedProd, setSelectedProd] = useState<ProductionOrder | null>(null);
@@ -96,7 +94,6 @@ export default function CocinaPage() {
 
     const handleVitrinaUpdated = () => {
       loadProductions();
-      loadPreparedProducts();
       loadVitrinaProducts();
     };
 
@@ -114,7 +111,7 @@ export default function CocinaPage() {
   }, []);
 
   const loadData = async () => {
-    await Promise.all([loadOrders(), loadProductions(), loadPreparedProducts(), loadVitrinaProducts()]);
+    await Promise.all([loadOrders(), loadProductions(), loadVitrinaProducts()]);
     setLoading(false);
   };
 
@@ -136,18 +133,6 @@ export default function CocinaPage() {
     }
   };
 
-  const loadPreparedProducts = async () => {
-    setLoadingPrepared(true);
-    try {
-      const data = await api.get<{ availableProducts: PreparedProduct[]; authorizedProducts: Array<{ id: string; product: PreparedProduct }> }>('/prepared-authorizations');
-      setPreparedProducts(data.availableProducts);
-    } catch (err: unknown) {
-      console.error(err);
-    } finally {
-      setLoadingPrepared(false);
-    }
-  };
-
   const loadVitrinaProducts = async () => {
     try {
       const data = await api.get<any[]>('/products');
@@ -155,19 +140,6 @@ export default function CocinaPage() {
       setVitrinaProductsList(data.filter((p) => p.preparationMode === 'VITRINA' && p.type === 'OWN'));
     } catch (err: unknown) {
       console.error(err);
-    }
-  };
-
-  const toggleAuthorizedProduct = async (productId: string, authorized: boolean) => {
-    try {
-      if (authorized) {
-        await api.delete<{ deleted: number }>(`/prepared-authorizations/${productId}`);
-      } else {
-        await api.post('/prepared-authorizations', { productId });
-      }
-      await loadPreparedProducts();
-    } catch (err: unknown) {
-      toast.error(err instanceof Error ? err.message : 'Error actualizando autorización');
     }
   };
 
@@ -279,54 +251,6 @@ export default function CocinaPage() {
 
   return (
     <div className="space-y-6">
-      {/* Top autorizar preparados panel */}
-      <div className="bg-white dark:bg-gray-800 rounded-2xl p-5 shadow-sm border border-gray-100 dark:border-gray-700">
-        <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 mb-4">
-          <div>
-            <h2 className="text-lg font-bold flex items-center gap-2">
-              <ChefHat className="text-salo-orange" /> Autorizar Preparados
-            </h2>
-            <p className="text-sm text-gray-500 dark:text-gray-400">
-              Solo los preparados autorizados hoy aparecerán en el landing y en el QR.
-            </p>
-          </div>
-          <div className="text-sm text-gray-500 dark:text-gray-400">
-            {loadingPrepared ? 'Cargando preparados...' : `${preparedProducts.filter((p) => p.authorized).length} autorizados hoy`}
-          </div>
-        </div>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          {preparedProducts.length === 0 ? (
-            <div className="col-span-full text-center text-gray-400 py-8">No hay productos preparados configurados.</div>
-          ) : (
-            preparedProducts.map((product) => (
-              <div key={product.id} className="bg-slate-50 dark:bg-gray-900 rounded-2xl p-4 border border-gray-100 dark:border-gray-700">
-                <div className="flex items-start gap-3">
-                  {product.photoUrl ? (
-                    <img src={product.photoUrl} alt={product.name} className="w-16 h-16 rounded-xl object-cover" />
-                  ) : (
-                    <div className="w-16 h-16 rounded-xl bg-gray-200 dark:bg-gray-700 flex items-center justify-center text-gray-500">P</div>
-                  )}
-                  <div className="flex-1">
-                    <p className="font-semibold">{product.name}</p>
-                    <p className="text-xs text-gray-500">{product.description || 'Sin descripción'}</p>
-                    <p className="text-sm font-medium mt-2">${product.salePrice.toFixed(0)}</p>
-                  </div>
-                </div>
-                <button
-                  onClick={() => toggleAuthorizedProduct(product.id, product.authorized)}
-                  className={cn(
-                    'mt-4 w-full py-2 rounded-xl text-sm font-semibold transition',
-                    product.authorized ? 'bg-red-500 text-white hover:bg-red-600' : 'bg-green-500 text-white hover:bg-green-600',
-                  )}
-                >
-                  {product.authorized ? 'Quitar autorización' : 'Autorizar hoy'}
-                </button>
-              </div>
-            ))
-          )}
-        </div>
-      </div>
-
       <div className="flex flex-col xl:flex-row gap-6 h-[calc(100vh-4rem)]">
         {/* Left Production orders panel */}
         <div className="xl:w-1/3 flex flex-col min-h-0">

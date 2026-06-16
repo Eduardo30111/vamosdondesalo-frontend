@@ -3,21 +3,22 @@ import { ExpensesService } from './expenses.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
+import { MerchantPlanGuard } from '../auth/guards/merchant-plan.guard';
 
 @Controller('expenses')
-@UseGuards(JwtAuthGuard, RolesGuard)
-@Roles('ADMIN')
+@UseGuards(JwtAuthGuard, RolesGuard, MerchantPlanGuard)
+@Roles('ADMIN', 'MERCHANT', 'MERCHANT_STAFF')
 export class ExpensesController {
   constructor(private service: ExpensesService) {}
 
   @Get()
-  findAll(@Query('type') type?: string) {
-    return this.service.findAll(type);
+  findAll(@Request() req: any, @Query('type') type?: string) {
+    return this.service.findAll(type, req.storeId);
   }
 
   @Get('range')
-  findByDateRange(@Query('from') from: string, @Query('to') to: string, @Query('type') type?: string) {
-    return this.service.findByDateRange(new Date(from), new Date(to), type);
+  findByDateRange(@Request() req: any, @Query('from') from: string, @Query('to') to: string, @Query('type') type?: string) {
+    return this.service.findByDateRange(new Date(from), new Date(to), type, req.storeId);
   }
 
   @Post()

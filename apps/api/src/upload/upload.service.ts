@@ -82,4 +82,58 @@ export class UploadService {
       ).end(file.buffer);
     });
   }
+
+  async uploadPromoMedia(file: { mimetype: string; size: number; buffer: Buffer }, req?: any): Promise<{ url: string; publicId: string; type: 'IMAGE' | 'VIDEO' }> {
+    const allowedMimes = [
+      'image/jpeg', 'image/png', 'image/webp', 'image/gif',
+      'video/mp4', 'video/webm', 'video/ogg', 'video/quicktime'
+    ];
+    if (!allowedMimes.includes(file.mimetype)) {
+      throw new BadRequestException(`Tipo de archivo no permitido: ${file.mimetype}. Usa imágenes o videos.`);
+    }
+
+    const type = file.mimetype.startsWith('video/') ? 'VIDEO' : 'IMAGE';
+
+    // Max size: 20MB for video, 5MB for image
+    const maxSize = type === 'VIDEO' ? 20 * 1024 * 1024 : 5 * 1024 * 1024;
+    if (file.size > maxSize) {
+      throw new BadRequestException(`El archivo excede el tamaño máximo permitido (${type === 'VIDEO' ? '20MB' : '5MB'}).`);
+    }
+
+    if (!this.configured) {
+      const ext = file.mimetype.split('/')[1] || 'bin';
+      const filename = `${Date.now()}-${Math.random().toString(36).slice(2,8)}.${ext}`;
+      const relPath = join('products', filename);
+      const fullPath = join(process.cwd(), 'uploads', relPath);
+      await fs.writeFile(fullPath, file.buffer);
+      
+      let apiBase = process.env.API_URL;
+      if (!apiBase && req) {
+        const protocol = req.headers['x-forwarded-proto'] || 'http';
+        apiBase = `${protocol}://${req.headers.host}`;
+      }
+      if (!apiBase) {
+        apiBase = `http://localhost:${process.env.API_PORT || 4000}`;
+      }
+
+      const url = `${apiBase}/uploads/${relPath.replace(/\\/g, '/')}`;
+      return { url, publicId: filename, type };
+    }
+
+    return new Promise((resolve, reject) => {
+      cloudinary.uploader.upload_stream(
+        {
+          folder: 'salo/promo',
+          resource_type: type === 'VIDEO' ? 'video' : 'image',
+        },
+        (error: any, result: any) => {
+          if (error || !result) {
+            reject(new BadRequestException(error?.message || 'Error al subir a Cloudinary'));
+          } else {
+            resolve({ url: result.secure_url, publicId: result.public_id, type });
+          }
+        },
+      ).end(file.buffer);
+    });
+  }
 }

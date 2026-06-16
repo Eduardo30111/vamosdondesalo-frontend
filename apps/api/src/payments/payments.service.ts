@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { RealtimeGateway } from '../realtime/realtime.gateway';
 
@@ -7,6 +7,11 @@ export class PaymentsService {
   constructor(private prisma: PrismaService, private realtime: RealtimeGateway) {}
 
   async createPayment(data: { orderId: string; method: string; amount: number }) {
+    const orderExists = await this.prisma.order.findUnique({ where: { id: data.orderId } });
+    if (orderExists && orderExists.paymentStatus === 'PAID') {
+      throw new BadRequestException('El pedido ya se encuentra cobrado');
+    }
+
     const payment = await this.prisma.payment.create({
       data: {
         orderId: data.orderId,

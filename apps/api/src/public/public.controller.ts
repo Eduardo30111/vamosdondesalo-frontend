@@ -59,15 +59,22 @@ export class PublicController {
 
   @Get('orders/track/:code')
   async trackOrder(@Param('code') code: string) {
-    const order = await this.prisma.order.findUnique({
-      where: { trackingCode: code },
+    const uppercaseCode = code.toUpperCase();
+    const orders = await this.prisma.order.findMany({
+      where: {
+        OR: [
+          { trackingCode: uppercaseCode },
+          { customerDoc: code }
+        ]
+      },
       include: {
         items: { include: { product: true } },
         deliveryZone: true,
       },
+      orderBy: { createdAt: 'desc' },
     });
-    if (!order) throw new NotFoundException('Pedido no encontrado');
-    return order;
+    if (orders.length === 0) throw new NotFoundException('Pedido no encontrado');
+    return orders;
   }
 
   @Get('payment-methods')
@@ -77,9 +84,7 @@ export class PublicController {
 
   private async getAvailableProducts() {
     const now = new Date();
-    const date = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
-
-    const [vitrinaProducts, authorizedPrepared] = await Promise.all([
+    const [vitrinaProducts, preparedProducts] = await Promise.all([
       this.prisma.product.findMany({
         where: {
           active: true,
@@ -100,39 +105,41 @@ export class PublicController {
         include: { vitrinaStock: true, store: true },
         orderBy: { name: 'asc' },
       }),
-      this.prisma.preparedAuthorization.findMany({
+      this.prisma.product.findMany({
         where: {
-          date,
-          product: {
-            active: true,
-            OR: [
-              { store: null },
-              {
-                store: {
-                  active: true,
-                  OR: [
-                    { planExpiresAt: { gt: new Date() } },
-                    { balance: { gte: 5000 } }
-                  ]
-                }
+          active: true,
+          preparationMode: 'PREPARADO',
+          OR: [
+            { store: null },
+            {
+              store: {
+                active: true,
+                OR: [
+                  { planExpiresAt: { gt: new Date() } },
+                  { balance: { gte: 5000 } }
+                ]
               }
-            ]
-          }
+            }
+          ]
         },
-        include: { product: { include: { store: true } } },
+        include: { store: true },
+        orderBy: { name: 'asc' },
       }),
     ]);
 
     const visibleVitrina = vitrinaProducts
       .map((p) => {
         const qty = p.vitrinaStock?.qty ?? 0;
-        return { ...p, remaining: qty, hasStock: qty > 0 };
+        const isFreeStore = p.store?.plan === 'FREE';
+        return {
+          ...p,
+          remaining: isFreeStore ? undefined : qty,
+          hasStock: isFreeStore ? true : qty > 0
+        };
       })
       .filter((p) => p.hasStock);
 
-    const visiblePrepared = authorizedPrepared
-      .map((auth) => auth.product)
-      .filter((product) => product.active)
+    const visiblePrepared = preparedProducts
       .sort((a, b) => a.name.localeCompare(b.name));
 
     return [...visibleVitrina, ...visiblePrepared];

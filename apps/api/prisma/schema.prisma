@@ -72,6 +72,8 @@ model Product {
   preparationMode       PreparationMode           @default(VITRINA)
   active                Boolean                   @default(true)
   dailyStock            Int                       @default(0)
+  saleType              String                    @default("UNIT")
+  prices                String?
   createdAt             DateTime                  @default(now())
   updatedAt             DateTime                  @updatedAt
 
@@ -129,6 +131,7 @@ model Order {
   customerName    String
   customerPhone   String?
   customerAddress String?
+  customerDoc     String?
   deliveryZoneId  String?
   deliveryFee     Float       @default(0)
   // fulfillmentStatus conserva los valores del enum OrderStatus existentes (PENDING->...->DELIVERED, etc)
@@ -278,6 +281,14 @@ model Store {
   balance         Float       @default(0.0)
   createdAt       DateTime    @default(now())
   updatedAt       DateTime    @updatedAt
+  promoMedia      String?
+  customTheme     String?
+  customDomain    String?
+
+  deliveryFeePuerto       Float    @default(2500)
+  deliveryFeePradomar     Float    @default(3000)
+  deliveryFeeSalgar       Float    @default(5000)
+  deliveryFeeBarranquilla Float    @default(8000)
 
   ownerId         String      @unique
   owner           User        @relation("StoreOwner", fields: [ownerId], references: [id])

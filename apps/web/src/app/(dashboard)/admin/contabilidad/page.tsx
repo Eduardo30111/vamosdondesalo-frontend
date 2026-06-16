@@ -18,6 +18,8 @@ interface DailyReport {
   netProfit: number;
   margin: number;
   expectedCash: number;
+  totalFiado: number;
+  totalAbonos: number;
 }
 
 interface MonthlyReport {
@@ -33,6 +35,8 @@ interface MonthlyReport {
   totalMonthlyExpenses: number;
   netProfit: number;
   margin: number;
+  totalFiado: number;
+  totalAbonos: number;
 }
 
 interface CashCloseRecord {
@@ -162,12 +166,15 @@ export default function ContabilidadPage() {
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                 <div className="bg-white dark:bg-gray-800 rounded-2xl p-5 shadow-sm border border-gray-100 dark:border-gray-700">
-                  <h3 className="font-bold mb-3">Ingresos</h3>
+                  <h3 className="font-bold mb-3">Ingresos y Créditos</h3>
                   <div className="space-y-2 text-sm">
-                    <div className="flex justify-between"><span>Ventas ({dailyReport.orderCount} pedidos)</span><span className="font-bold text-green-500">{formatCurrency(dailyReport.totalSales)}</span></div>
+                    <div className="flex justify-between font-semibold"><span>Ventas ({dailyReport.orderCount} pedidos)</span><span className="text-green-500">{formatCurrency(dailyReport.totalSales)}</span></div>
                     {dailyReport.salesByMethod.map(s => (
                       <div key={s.method} className="flex justify-between text-gray-500 pl-4"><span>{s.method}</span><span>{formatCurrency(s.amount)}</span></div>
                     ))}
+                    <div className="border-t my-2 dark:border-gray-700"></div>
+                    <div className="flex justify-between font-medium"><span>Abonos de Fiados (Recaudado)</span><span className="text-green-600 font-bold">{formatCurrency(dailyReport.totalAbonos)}</span></div>
+                    <div className="flex justify-between font-medium text-gray-500"><span>Fiado en el día (Por Cobrar)</span><span className="text-purple-650 font-bold">{formatCurrency(dailyReport.totalFiado)}</span></div>
                   </div>
                 </div>
 
@@ -213,12 +220,15 @@ export default function ContabilidadPage() {
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                 <div className="bg-white dark:bg-gray-800 rounded-2xl p-5 shadow-sm border border-gray-100 dark:border-gray-700">
-                  <h3 className="font-bold mb-3">Ingresos</h3>
+                  <h3 className="font-bold mb-3">Ingresos y Créditos</h3>
                   <div className="space-y-2 text-sm">
-                    <div className="flex justify-between"><span>Ventas totales</span><span className="font-bold text-green-500">{formatCurrency(monthlyReport.totalSales)}</span></div>
+                    <div className="flex justify-between font-semibold"><span>Ventas totales</span><span className="text-green-500">{formatCurrency(monthlyReport.totalSales)}</span></div>
                     {monthlyReport.salesByMethod.map(s => (
                       <div key={s.method} className="flex justify-between text-gray-500 pl-4"><span>{s.method}</span><span>{formatCurrency(s.amount)}</span></div>
                     ))}
+                    <div className="border-t my-2 dark:border-gray-700"></div>
+                    <div className="flex justify-between font-medium"><span>Abonos de Fiados (Recaudado)</span><span className="text-green-600 font-bold">{formatCurrency(monthlyReport.totalAbonos)}</span></div>
+                    <div className="flex justify-between font-medium text-gray-500"><span>Fiado en el mes (Por Cobrar)</span><span className="text-purple-650 font-bold">{formatCurrency(monthlyReport.totalFiado)}</span></div>
                   </div>
                 </div>
 

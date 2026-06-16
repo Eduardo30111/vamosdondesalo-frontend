@@ -96,14 +96,30 @@ export class OrdersController {
   }
 
   @Put(':id/cancelar')
-  @Roles('ADMIN', 'VENDEDOR')
+  @Roles('ADMIN', 'VENDEDOR', 'MERCHANT')
   cancelar(@Param('id') id: string) {
     return this.ordersService.cancelar(id);
   }
 
   @Put(':id/status')
-  @Roles('ADMIN', 'VENDEDOR', 'COCINA')
+  @Roles('ADMIN', 'VENDEDOR', 'COCINA', 'MERCHANT')
   updateStatus(@Param('id') id: string, @Body() dto: UpdateOrderStatusDto) {
     return this.ordersService.updateStatus(id, dto.status);
+  }
+
+  @Put(':id/remove-item/:itemId')
+  @Roles('ADMIN', 'VENDEDOR', 'MERCHANT')
+  removeItem(@Param('id') id: string, @Param('itemId') itemId: string) {
+    return this.ordersService.removeItem(id, itemId);
+  }
+
+  @Put(':id/edit-item/:itemId')
+  @Roles('ADMIN', 'VENDEDOR', 'MERCHANT')
+  editItem(
+    @Param('id') id: string,
+    @Param('itemId') itemId: string,
+    @Body() body: { qty?: number; unitPrice?: number }
+  ) {
+    return this.ordersService.editItem(id, itemId, body.qty, body.unitPrice);
   }
 }

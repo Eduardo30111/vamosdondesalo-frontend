@@ -18,6 +18,7 @@ import {
   Bike,
   ShoppingBag,
   Factory,
+  Pencil,
 } from 'lucide-react';
 
 
@@ -29,6 +30,8 @@ interface Product {
   salePrice: number;
   type: string;
   preparationMode: string;
+  saleType: string;
+  prices: string | null;
   vitrinaStock: { qty: number } | null;
 }
 
@@ -73,12 +76,23 @@ export default function POSPage() {
   const [fiarName, setFiarName] = useState('');
   const [fiarPhone, setFiarPhone] = useState('');
   const [existingCustomer, setExistingCustomer] = useState<{ id: string; name: string } | null>(null);
+  const [fiadosCustomers, setFiadosCustomers] = useState<any[]>([]);
+
+  const [submitting, setSubmitting] = useState(false);
+  const [receivedAmount, setReceivedAmount] = useState('');
 
   const cart = useCartStore();
   const [showProduction, setShowProduction] = useState(false);
   const [productionProduct, setProductionProduct] = useState<Product | null>(null);
   const [productionQty, setProductionQty] = useState('');
   const [productionLoading, setProductionLoading] = useState(false);
+
+  // Dynamic selection prompts
+  const [activeSelectProduct, setActiveSelectProduct] = useState<Product | null>(null);
+  const [selectMode, setSelectMode] = useState<'WEIGHT' | 'MENUDEO' | 'VARIANTS' | null>(null);
+  const [weightValue, setWeightValue] = useState('');
+  const [menudeoValue, setMenudeoValue] = useState('');
+  const [variantsList, setVariantsList] = useState<any[]>([]);
 
   // Offline states
   const [isOnline, setIsOnline] = useState(true);
@@ -171,35 +185,94 @@ export default function POSPage() {
     }
   }, []);
 
+  useEffect(() => {
+    if (showFiar) {
+      api.get<any[]>('/customers')
+        .then((custs) => {
+          setFiadosCustomers(custs);
+          localStorage.setItem('salo_cached_fiados_customers', JSON.stringify(custs));
+        })
+        .catch((e) => console.error('Error refreshing fiados customers:', e));
+    }
+  }, [showFiar]);
+
+  const handleProductSelect = (product: Product) => {
+    const remaining = product.vitrinaStock?.qty ?? 0;
+    const isVitrina = product.preparationMode === 'VITRINA';
+    const existing = cart.items.find((i) => i.productId === product.id);
+    const currentQty = existing ? existing.qty : 0;
+    if (isVitrina && currentQty >= remaining) {
+      toast.error(`No hay suficiente stock de "${product.name}" en la vitrina (Disponible: ${remaining})`);
+      return;
+    }
+
+    let parsedPrices: any[] = [];
+    if (product.prices) {
+      try {
+        parsedPrices = JSON.parse(product.prices);
+      } catch (e) {
+        console.error('Error parsing product prices:', e);
+      }
+    }
+
+    if (product.saleType === 'WEIGHT') {
+      setActiveSelectProduct(product);
+      setSelectMode('WEIGHT');
+      setWeightValue('');
+    } else if (product.saleType === 'MENUDEO') {
+      setActiveSelectProduct(product);
+      setSelectMode('MENUDEO');
+      setMenudeoValue('');
+    } else if (parsedPrices && parsedPrices.length > 0) {
+      setActiveSelectProduct(product);
+      setSelectMode('VARIANTS');
+      setVariantsList(parsedPrices);
+    } else {
+      cart.addItem({
+        productId: product.id,
+        name: product.name,
+        price: product.salePrice,
+        photoUrl: product.photoUrl
+      });
+    }
+  };
+
   const loadData = async () => {
     try {
-      const [prods, tbls, methods, zones] = await Promise.all([
+      const [prods, tbls, methods, zones, custs] = await Promise.all([
         api.get<Product[]>('/products'),
         api.get<Table[]>('/tables'),
         api.get<PaymentMethodConfig[]>('/payments/methods'),
         api.get<DeliveryZone[]>('/delivery-zones/enabled'),
+        api.get<any[]>('/customers').catch(() => []),
       ]);
       
       localStorage.setItem('salo_cached_products', JSON.stringify(prods));
       localStorage.setItem('salo_cached_tables', JSON.stringify(tbls));
       localStorage.setItem('salo_cached_payment_methods', JSON.stringify(methods));
       localStorage.setItem('salo_cached_delivery_zones', JSON.stringify(zones));
+      localStorage.setItem('salo_cached_fiados_customers', JSON.stringify(custs));
 
       setProducts(prods);
       setTables(tbls);
       setPaymentMethods(methods.filter((m) => m.enabled));
       setDeliveryZones(zones);
+      setFiadosCustomers(custs);
     } catch (err: unknown) {
       const cachedProds = localStorage.getItem('salo_cached_products');
       const cachedTables = localStorage.getItem('salo_cached_tables');
       const cachedMethods = localStorage.getItem('salo_cached_payment_methods');
       const cachedZones = localStorage.getItem('salo_cached_delivery_zones');
+      const cachedCusts = localStorage.getItem('salo_cached_fiados_customers');
 
       if (cachedProds && cachedTables && cachedMethods && cachedZones) {
         setProducts(JSON.parse(cachedProds));
         setTables(JSON.parse(cachedTables));
         setPaymentMethods(JSON.parse(cachedMethods).filter((m: any) => m.enabled));
         setDeliveryZones(JSON.parse(cachedZones));
+        if (cachedCusts) {
+          setFiadosCustomers(JSON.parse(cachedCusts));
+        }
         toast.warning('Sin conexión. Usando datos guardados localmente.');
       } else {
         toast.error('Error cargando datos y no hay copia local guardada.');
@@ -231,6 +304,7 @@ export default function POSPage() {
   const getTotal = () => cart.total() + getDeliveryFee();
 
   const handleCreateOrder = async (paymentMethodForOffline?: string): Promise<{ id: string; total: number } | null> => {
+    if (submitting) return null;
     if (cart.items.length === 0) {
       toast.error('Agrega productos al pedido');
       return null;
@@ -254,8 +328,8 @@ export default function POSPage() {
       toast.error('Selecciona una mesa');
       return null;
     }
-    if (cart.orderType === 'DELIVERY' && !selectedZone) {
-      toast.error('Selecciona una zona de domicilio');
+    if (cart.orderType === 'DELIVERY' && (!cart.customerName || !customerPhone || !customerAddress || !selectedZone)) {
+      toast.error('Completa los campos de domicilio');
       return null;
     }
 
@@ -267,12 +341,14 @@ export default function POSPage() {
       customerAddress: cart.orderType === 'DELIVERY' ? customerAddress : undefined,
       deliveryZoneId: cart.orderType === 'DELIVERY' ? selectedZone : undefined,
       notes: cart.notes,
-      items: cart.items.map((i) => ({
-        productId: i.productId,
-        qty: i.qty,
-        notes: i.notes || undefined,
+      items: cart.items.map((item) => ({
+        productId: item.productId,
+        qty: item.qty,
+        notes: item.notes || undefined,
       })),
     };
+
+    setSubmitting(true);
 
     if (!navigator.onLine) {
       const tempId = 'local-' + Date.now();
@@ -315,6 +391,7 @@ export default function POSPage() {
       setShowPayment(false);
       resetDeliveryFields();
       cart.clear();
+      setSubmitting(false);
       return { id: tempId, total };
     }
 
@@ -371,26 +448,38 @@ export default function POSPage() {
       }
       toast.error(err instanceof Error ? err.message : 'Error creando pedido');
       return null;
+    } finally {
+      setSubmitting(false);
     }
   };
 
+  const handleCreateOnly = async () => {
+    if (submitting) return;
+    await handleCreateOrder();
+  };
+
   const handlePayAndCreate = async () => {
+    if (submitting) return;
     if (!selectedMethod) {
       toast.error('Selecciona un método de pago');
       return;
     }
-    const order = await handleCreateOrder(selectedMethod);
-    if (order && !order.id.startsWith('local-')) {
-      try {
+    setSubmitting(true);
+    try {
+      const order = await handleCreateOrder(selectedMethod);
+      if (order && !order.id.startsWith('local-')) {
         await api.post('/payments', {
           orderId: order.id,
           method: selectedMethod,
           amount: order.total,
         });
         toast.success('Pago registrado');
-      } catch (err: unknown) {
-        toast.error(err instanceof Error ? err.message : 'Error registrando pago');
       }
+    } catch (err: unknown) {
+      toast.error(err instanceof Error ? err.message : 'Error registrando pago');
+    } finally {
+      setSubmitting(false);
+      setReceivedAmount('');
     }
   };
 
@@ -415,9 +504,21 @@ export default function POSPage() {
   };
 
   const handleFiar = async () => {
+    if (submitting) return;
     if (cart.items.length === 0) {
       toast.error('Agrega productos al pedido');
       return;
+    }
+    // Validar stock para productos de VITRINA
+    for (const item of cart.items) {
+      const prod = products.find((p) => p.id === item.productId);
+      if (prod && prod.preparationMode === 'VITRINA') {
+        const stock = prod.vitrinaStock?.qty ?? 0;
+        if (item.qty > stock) {
+          toast.error(`No hay suficiente stock de "${prod.name}" en la vitrina (Disponible: ${stock})`);
+          return;
+        }
+      }
     }
     if (!fiarCedula.trim()) {
       toast.error('Ingresa la cédula del cliente');
@@ -449,6 +550,8 @@ export default function POSPage() {
       phone: fiarPhone || undefined,
     };
 
+    setSubmitting(true);
+
     if (!navigator.onLine) {
       addToOfflineQueue({
         type: 'FIADO',
@@ -464,6 +567,7 @@ export default function POSPage() {
       setExistingCustomer(null);
       resetDeliveryFields();
       cart.clear();
+      setSubmitting(false);
       return;
     }
 
@@ -518,6 +622,8 @@ export default function POSPage() {
         return;
       }
       toast.error(err instanceof Error ? err.message : 'Error registrando fiado');
+    } finally {
+      setSubmitting(false);
     }
   };
 
@@ -610,17 +716,7 @@ export default function POSPage() {
                   className="bg-white dark:bg-gray-800 rounded-xl p-3 shadow-sm hover:shadow-md border border-gray-100 dark:border-gray-700 transition-all text-left flex flex-col"
                 >
                   <button
-                    onClick={() => {
-                      const existing = cart.items.find((i) => i.productId === product.id);
-                      const currentQty = existing ? existing.qty : 0;
-                      if (isVitrina) {
-                        if (currentQty + 1 > remaining) {
-                          toast.error(`No hay suficiente stock de "${product.name}" en la vitrina (Disponible: ${remaining})`);
-                          return;
-                        }
-                      }
-                      cart.addItem({ productId: product.id, name: product.name, price: product.salePrice, photoUrl: product.photoUrl });
-                    }}
+                    onClick={() => handleProductSelect(product)}
                     className="flex-1 text-left"
                   >
                     <div className="aspect-square relative rounded-lg overflow-hidden mb-2 bg-gray-100 dark:bg-gray-700">
@@ -805,21 +901,34 @@ export default function POSPage() {
               </div>
             ) : (
               cart.items.map((item) => (
-                <div key={item.productId} className="flex items-center gap-3 bg-gray-50 dark:bg-gray-700 rounded-xl p-3">
+                <div key={item.cartItemId} className="flex items-center gap-3 bg-gray-50 dark:bg-gray-700 rounded-xl p-3">
                   <div className="flex-1 min-w-0">
                     <p className="font-medium text-sm truncate">{item.name}</p>
-                    <p className="text-xs text-gray-500">{formatCurrency(item.price)} c/u</p>
+                    <p className="text-xs text-gray-500 flex items-center gap-1">
+                      {formatCurrency(item.price)} c/u
+                      <button
+                        onClick={() => {
+                          const newPrice = prompt(`Editar precio de "${item.name}":`, item.price.toString());
+                          if (newPrice !== null && !isNaN(Number(newPrice))) {
+                            cart.updateItemPrice(item.cartItemId, Number(newPrice));
+                          }
+                        }}
+                        className="text-gray-400 hover:text-salo-orange transition"
+                      >
+                        <Pencil size={11} />
+                      </button>
+                    </p>
                     <input
                       type="text"
                       placeholder="Nota..."
                       value={item.notes}
-                      onChange={(e) => cart.updateItemNotes(item.productId, e.target.value)}
+                      onChange={(e) => cart.updateItemNotes(item.cartItemId, e.target.value)}
                       className="mt-1 w-full px-2 py-1 rounded text-xs border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-800"
                     />
                   </div>
                   <div className="flex items-center gap-1">
                     <button
-                      onClick={() => cart.updateQty(item.productId, item.qty - 1)}
+                      onClick={() => cart.updateQty(item.cartItemId, item.qty - 1)}
                       className="w-7 h-7 rounded-lg bg-gray-200 dark:bg-gray-600 flex items-center justify-center"
                     >
                       <Minus size={14} />
@@ -835,14 +944,14 @@ export default function POSPage() {
                             return;
                           }
                         }
-                        cart.updateQty(item.productId, item.qty + 1);
+                        cart.updateQty(item.cartItemId, item.qty + 1);
                       }}
                       className="w-7 h-7 rounded-lg bg-gray-200 dark:bg-gray-600 flex items-center justify-center"
                     >
                       <Plus size={14} />
                     </button>
                     <button
-                      onClick={() => cart.removeItem(item.productId)}
+                      onClick={() => cart.removeItem(item.cartItemId)}
                       className="w-7 h-7 rounded-lg bg-red-100 dark:bg-red-900/30 text-red-500 flex items-center justify-center ml-1"
                     >
                       <Trash2 size={14} />
@@ -875,15 +984,19 @@ export default function POSPage() {
 
             <div className="grid grid-cols-3 gap-2">
               <button
-                onClick={() => handleCreateOrder()}
-                disabled={cart.items.length === 0}
-                className="py-3 rounded-xl bg-salo-orange text-white font-semibold text-sm hover:bg-primary-700 transition disabled:opacity-50 disabled:cursor-not-allowed"
+                onClick={handleCreateOnly}
+                disabled={submitting || cart.items.length === 0}
+                className="py-3 rounded-xl bg-salo-orange text-white font-semibold text-sm hover:bg-primary-700 transition disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-1"
               >
-                Crear
+                {submitting ? (
+                  <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white" />
+                ) : (
+                  "Crear"
+                )}
               </button>
               <button
-                onClick={() => setShowPayment(true)}
-                disabled={cart.items.length === 0}
+                onClick={() => { setShowPayment(true); setReceivedAmount(''); }}
+                disabled={submitting || cart.items.length === 0}
                 className="py-3 rounded-xl bg-green-600 text-white font-semibold text-sm hover:bg-green-700 transition disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-1"
               >
                 <CreditCard size={14} />
@@ -891,7 +1004,7 @@ export default function POSPage() {
               </button>
               <button
                 onClick={() => setShowFiar(true)}
-                disabled={cart.items.length === 0}
+                disabled={submitting || cart.items.length === 0}
                 className="py-3 rounded-xl bg-purple-600 text-white font-semibold text-sm hover:bg-purple-700 transition disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 Fiar
@@ -945,12 +1058,44 @@ export default function POSPage() {
               </div>
             )}
 
+            {selectedMethod && (
+              <div className="mb-4 space-y-3">
+                <div>
+                  <label className="block text-xs font-semibold text-gray-500 mb-1">
+                    Monto Recibido
+                  </label>
+                  <input
+                    type="number"
+                    placeholder="¿Con cuánto paga el cliente?"
+                    value={receivedAmount}
+                    onChange={(e) => setReceivedAmount(e.target.value)}
+                    className="w-full px-4 py-2.5 rounded-xl border border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 text-lg font-semibold"
+                  />
+                </div>
+                {parseFloat(receivedAmount) > 0 && (
+                  <div className="p-3 bg-green-50 dark:bg-green-950/20 rounded-xl flex justify-between items-center">
+                    <span className="text-sm font-medium text-green-700 dark:text-green-400">Cambio a devolver:</span>
+                    <span className="text-lg font-bold text-green-700 dark:text-green-400">
+                      {formatCurrency(Math.max(0, (parseFloat(receivedAmount) || 0) - getTotal()))}
+                    </span>
+                  </div>
+                )}
+              </div>
+            )}
+
             <button
               onClick={handlePayAndCreate}
-              disabled={!selectedMethod}
-              className="w-full py-3 rounded-xl bg-green-600 text-white font-semibold hover:bg-green-700 transition disabled:opacity-50"
+              disabled={!selectedMethod || submitting}
+              className="w-full py-3 rounded-xl bg-green-600 text-white font-semibold hover:bg-green-700 transition disabled:opacity-50 flex items-center justify-center gap-2"
             >
-              Confirmar Pago y Crear Pedido
+              {submitting ? (
+                <>
+                  <span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></span>
+                  Confirmando...
+                </>
+              ) : (
+                'Confirmar Pago y Crear Pedido'
+              )}
             </button>
           </div>
         </div>
@@ -970,51 +1115,97 @@ export default function POSPage() {
             <p className="text-2xl font-bold text-purple-600 mb-4">{formatCurrency(getTotal())}</p>
 
             <div className="space-y-3">
-              <div className="flex gap-2">
-                <input
-                  type="text"
-                  placeholder="Cédula del cliente"
-                  value={fiarCedula}
-                  onChange={(e) => setFiarCedula(e.target.value)}
-                  className="flex-1 px-4 py-2.5 rounded-xl border border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-700"
-                />
-                <button
-                  onClick={handleFiarLookup}
-                  className="px-4 py-2.5 bg-gray-200 dark:bg-gray-600 rounded-xl text-sm font-medium hover:bg-gray-300 dark:hover:bg-gray-500 transition"
+              <div>
+                <label className="block text-xs font-semibold text-gray-500 mb-1">Seleccionar Cliente Registrado</label>
+                <select
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    if (val === '' || val === 'new') {
+                      setExistingCustomer(null);
+                      setFiarCedula('');
+                      setFiarName('');
+                      setFiarPhone('');
+                    } else {
+                      const selected = fiadosCustomers.find((c) => c.id === val);
+                      if (selected) {
+                        setExistingCustomer({ id: selected.id, name: selected.name });
+                        setFiarCedula(selected.cedula);
+                        setFiarName(selected.name);
+                        setFiarPhone(selected.phone || '');
+                      }
+                    }
+                  }}
+                  className="w-full px-4 py-2.5 rounded-xl border border-gray-200 dark:border-gray-650 bg-gray-50 dark:bg-gray-750 text-sm outline-none focus:ring-2 focus:ring-purple-400"
                 >
-                  Buscar
-                </button>
+                  <option value="">-- Seleccionar cliente --</option>
+                  {fiadosCustomers.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.name} (CC: {c.cedula})
+                    </option>
+                  ))}
+                  <option value="new">+ Registrar Nuevo Cliente...</option>
+                </select>
               </div>
 
-              {existingCustomer && (
-                <p className="text-sm text-green-600 font-medium">Cliente encontrado: {existingCustomer.name}</p>
-              )}
-
-              {!existingCustomer && fiarCedula && (
+              {existingCustomer ? (
+                <div className="p-3.5 bg-purple-50 dark:bg-purple-950/20 border border-purple-100 dark:border-purple-900/40 rounded-xl space-y-1 text-sm">
+                  <p className="font-semibold text-purple-700 dark:text-purple-300">Cliente Seleccionado:</p>
+                  <p className="font-bold text-gray-800 dark:text-gray-150">{fiarName}</p>
+                  <p className="text-xs text-gray-500 dark:text-gray-400">CC: {fiarCedula}</p>
+                </div>
+              ) : (
                 <>
-                  <input
-                    type="text"
-                    placeholder="Nombre del cliente (nuevo)"
-                    value={fiarName}
-                    onChange={(e) => setFiarName(e.target.value)}
-                    className="w-full px-4 py-2.5 rounded-xl border border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-700"
-                  />
-                  <input
-                    type="tel"
-                    placeholder="Teléfono (opcional)"
-                    value={fiarPhone}
-                    onChange={(e) => setFiarPhone(e.target.value)}
-                    className="w-full px-4 py-2.5 rounded-xl border border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-700"
-                  />
+                  <div className="flex gap-2">
+                    <input
+                      type="text"
+                      placeholder="Cédula del cliente"
+                      value={fiarCedula}
+                      onChange={(e) => setFiarCedula(e.target.value)}
+                      className="flex-1 px-4 py-2.5 rounded-xl border border-gray-200 dark:border-gray-650 bg-gray-50 dark:bg-gray-750 text-sm outline-none focus:ring-2 focus:ring-purple-400"
+                    />
+                    <button
+                      type="button"
+                      onClick={handleFiarLookup}
+                      className="px-4 py-2.5 bg-gray-200 dark:bg-gray-600 rounded-xl text-sm font-medium hover:bg-gray-300 dark:hover:bg-gray-500 transition"
+                    >
+                      Buscar
+                    </button>
+                  </div>
+
+                  {fiarCedula && (
+                    <>
+                      <input
+                        type="text"
+                        placeholder="Nombre del cliente (nuevo)"
+                        value={fiarName}
+                        onChange={(e) => setFiarName(e.target.value)}
+                        className="w-full px-4 py-2.5 rounded-xl border border-gray-200 dark:border-gray-650 bg-gray-50 dark:bg-gray-750 text-sm outline-none focus:ring-2 focus:ring-purple-400"
+                      />
+                      <input
+                        type="tel"
+                        placeholder="Teléfono (opcional)"
+                        value={fiarPhone}
+                        onChange={(e) => setFiarPhone(e.target.value)}
+                        className="w-full px-4 py-2.5 rounded-xl border border-gray-200 dark:border-gray-650 bg-gray-50 dark:bg-gray-750 text-sm outline-none focus:ring-2 focus:ring-purple-400"
+                      />
+                    </>
+                  )}
                 </>
               )}
 
               <button
                 onClick={handleFiar}
-                disabled={!fiarCedula || (!existingCustomer && !fiarName)}
-                className="w-full py-3 rounded-xl bg-purple-600 text-white font-semibold hover:bg-purple-700 transition disabled:opacity-50"
+                disabled={!fiarCedula || (!existingCustomer && !fiarName) || submitting}
+                className="w-full py-3 rounded-xl bg-purple-600 text-white font-semibold hover:bg-purple-700 transition disabled:opacity-50 flex items-center justify-center gap-2"
               >
-                Confirmar Fiado
+                {submitting ? (
+                  <>
+                    <span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></span>
+                    Confirmando...
+                  </>
+                ) : (
+                  'Confirmar Fiado'
+                )}
               </button>
             </div>
           </div>
@@ -1053,6 +1244,170 @@ export default function POSPage() {
                 {productionLoading ? 'Enviando...' : 'Enviar a Cocina'}
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* WEIGHT Modal */}
+      {selectMode === 'WEIGHT' && activeSelectProduct && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+          <div className="bg-white dark:bg-gray-800 rounded-2xl w-full max-w-sm p-6 shadow-2xl">
+            <div className="flex justify-between items-center mb-4">
+              <h3 className="text-lg font-bold">Ingresar Peso</h3>
+              <button onClick={() => setSelectMode(null)} className="p-1">
+                <X size={20} />
+              </button>
+            </div>
+            <p className="text-sm text-gray-500 mb-2">{activeSelectProduct.name}</p>
+            <p className="text-xs text-gray-400 mb-4">Precio por Kg/Libra: {formatCurrency(activeSelectProduct.salePrice)}</p>
+            <input
+              type="number"
+              step="any"
+              placeholder="Ej: 1.5 (en Kg/Libra)"
+              value={weightValue}
+              onChange={(e) => setWeightValue(e.target.value)}
+              className="w-full px-3 py-2 rounded-lg border border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 text-sm mb-4 outline-none focus:ring-2 focus:ring-salo-orange"
+              autoFocus
+            />
+            <div className="flex gap-2">
+              <button
+                onClick={() => setSelectMode(null)}
+                className="flex-1 py-2.5 rounded-xl border border-gray-200 dark:border-gray-600 text-sm font-medium"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={() => {
+                  const weight = Number(weightValue);
+                  if (weight <= 0 || isNaN(weight)) {
+                    toast.error('Por favor ingresa un peso válido mayor a 0');
+                    return;
+                  }
+                  const totalPrice = Math.round(activeSelectProduct.salePrice * weight);
+                  cart.addItem({
+                    productId: activeSelectProduct.id,
+                    name: `${activeSelectProduct.name} (${weight} Kg)`,
+                    price: totalPrice,
+                    photoUrl: activeSelectProduct.photoUrl
+                  });
+                  setSelectMode(null);
+                }}
+                disabled={!weightValue}
+                className="flex-1 py-2.5 rounded-xl bg-salo-orange text-white text-sm font-medium hover:bg-primary-700 transition disabled:opacity-50"
+              >
+                Agregar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MENUDEO Modal */}
+      {selectMode === 'MENUDEO' && activeSelectProduct && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+          <div className="bg-white dark:bg-gray-800 rounded-2xl w-full max-w-sm p-6 shadow-2xl">
+            <div className="flex justify-between items-center mb-4">
+              <h3 className="text-lg font-bold">Monto de Porción (Menudeo)</h3>
+              <button onClick={() => setSelectMode(null)} className="p-1">
+                <X size={20} />
+              </button>
+            </div>
+            <p className="text-sm text-gray-500 mb-4">{activeSelectProduct.name}</p>
+            
+            {/* Quick buttons */}
+            <div className="grid grid-cols-2 gap-2 mb-4">
+              {[2000, 3000, 5000, 10000].map((val) => (
+                <button
+                  key={val}
+                  type="button"
+                  onClick={() => setMenudeoValue(val.toString())}
+                  className="py-2 text-xs font-bold rounded-lg border border-gray-200 dark:border-gray-700 hover:bg-orange-50 dark:hover:bg-orange-950/20 hover:border-orange-500 transition"
+                >
+                  {formatCurrency(val)}
+                </button>
+              ))}
+            </div>
+
+            <input
+              type="number"
+              placeholder="Ingresa valor personalizado"
+              value={menudeoValue}
+              onChange={(e) => setMenudeoValue(e.target.value)}
+              className="w-full px-3 py-2 rounded-lg border border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 text-sm mb-4 outline-none focus:ring-2 focus:ring-salo-orange"
+              autoFocus
+            />
+            <div className="flex gap-2">
+              <button
+                onClick={() => setSelectMode(null)}
+                className="flex-1 py-2.5 rounded-xl border border-gray-200 dark:border-gray-600 text-sm font-medium"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={() => {
+                  const amount = Number(menudeoValue);
+                  if (amount <= 0 || isNaN(amount)) {
+                    toast.error('Por favor ingresa un monto válido');
+                    return;
+                  }
+                  cart.addItem({
+                    productId: activeSelectProduct.id,
+                    name: `${activeSelectProduct.name} (Porción)`,
+                    price: amount,
+                    photoUrl: activeSelectProduct.photoUrl
+                  });
+                  setSelectMode(null);
+                }}
+                disabled={!menudeoValue}
+                className="flex-1 py-2.5 rounded-xl bg-salo-orange text-white text-sm font-medium hover:bg-primary-700 transition disabled:opacity-50"
+              >
+                Agregar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* VARIANTS Modal */}
+      {selectMode === 'VARIANTS' && activeSelectProduct && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+          <div className="bg-white dark:bg-gray-800 rounded-2xl w-full max-w-sm p-6 shadow-2xl">
+            <div className="flex justify-between items-center mb-4">
+              <h3 className="text-lg font-bold">Seleccionar Variante</h3>
+              <button onClick={() => setSelectMode(null)} className="p-1">
+                <X size={20} />
+              </button>
+            </div>
+            <p className="text-sm text-gray-500 mb-4">{activeSelectProduct.name}</p>
+
+            <div className="space-y-2 mb-6 max-h-60 overflow-y-auto">
+              {variantsList.map((variant, idx) => (
+                <button
+                  key={idx}
+                  type="button"
+                  onClick={() => {
+                    cart.addItem({
+                      productId: activeSelectProduct.id,
+                      name: `${activeSelectProduct.name} (${variant.label})`,
+                      price: variant.price,
+                      photoUrl: activeSelectProduct.photoUrl
+                    });
+                    setSelectMode(null);
+                  }}
+                  className="w-full text-left p-3 rounded-xl border border-gray-200 dark:border-gray-750 hover:bg-orange-50 dark:hover:bg-orange-950/20 hover:border-orange-500 transition flex justify-between items-center"
+                >
+                  <span className="font-semibold text-sm">{variant.label}</span>
+                  <span className="font-bold text-salo-orange text-sm">{formatCurrency(variant.price)}</span>
+                </button>
+              ))}
+            </div>
+
+            <button
+              onClick={() => setSelectMode(null)}
+              className="w-full py-2.5 rounded-xl border border-gray-200 dark:border-gray-600 text-sm font-medium"
+            >
+              Cancelar
+            </button>
           </div>
         </div>
       )}

@@ -14,7 +14,8 @@ import {
   Send,
   Sparkles,
   ShieldCheck,
-  Award
+  Award,
+  Lock
 } from 'lucide-react';
 import {
   ResponsiveContainer,
@@ -39,6 +40,7 @@ interface Store {
   commissionRate: number;
   balance: number;
   active: boolean;
+  createdAt: string;
 }
 
 interface Order {
@@ -97,6 +99,7 @@ export default function MerchantDashboard() {
   }
 
   // Calculate analytics
+  const isStoreInTrial = (Date.now() - new Date(store.createdAt).getTime()) < 30 * 24 * 60 * 60 * 1000;
   const today = new Date().toDateString();
   const todayOrders = orders.filter((o) => new Date(o.createdAt).toDateString() === today && o.fulfillmentStatus !== 'CANCELLED');
   
@@ -107,14 +110,22 @@ export default function MerchantDashboard() {
   const totalCommissionToday = todayOrders.reduce((sum, o) => {
     // total includes deliveryFee, so calculate items subtotal
     const subtotal = o.items.reduce((s, it) => s + it.unitPrice * it.qty, 0);
-    return sum + subtotal * store.commissionRate;
+    const orderTime = new Date(o.createdAt).getTime();
+    const storeTime = new Date(store.createdAt).getTime();
+    const isTrialOrder = (orderTime - storeTime) < 30 * 24 * 60 * 60 * 1000;
+    const rate = isTrialOrder ? 0 : store.commissionRate;
+    return sum + subtotal * rate;
   }, 0);
 
   // Profit today = items total sale - items total cost - commission
   const profitToday = todayOrders.reduce((sum, o) => {
     const itemsSale = o.items.reduce((s, it) => s + it.unitPrice * it.qty, 0);
     const itemsCost = o.items.reduce((s, it) => s + (it.product?.costPrice || 0) * it.qty, 0);
-    const commission = itemsSale * store.commissionRate;
+    const orderTime = new Date(o.createdAt).getTime();
+    const storeTime = new Date(store.createdAt).getTime();
+    const isTrialOrder = (orderTime - storeTime) < 30 * 24 * 60 * 60 * 1000;
+    const rate = isTrialOrder ? 0 : store.commissionRate;
+    const commission = itemsSale * rate;
     return sum + (itemsSale - itemsCost - commission);
   }, 0);
 
@@ -179,7 +190,7 @@ export default function MerchantDashboard() {
               href={adminWhatsAppUrl}
               target="_blank"
               rel="noopener noreferrer"
-              className="inline-flex items-center gap-1.5 px-4 py-2 bg-red-600 hover:bg-red-700 text-white text-xs font-bold rounded-xl shadow-sm transition mt-2"
+              className="inline-flex items-center gap-1.5 px-4 py-2 bg-red-650 hover:bg-red-700 text-white text-xs font-bold rounded-xl shadow-sm transition mt-2"
             >
               <Send size={12} /> Solicitar Recarga vía WhatsApp
             </a>
@@ -227,7 +238,7 @@ export default function MerchantDashboard() {
           </div>
           <div>
             <p className="text-xs text-gray-400 font-bold uppercase tracking-wider">Comisión Aplicada</p>
-            <p className="text-xl font-black text-gray-900 dark:text-white mt-0.5">{(store.commissionRate * 100)}%</p>
+            <p className="text-xl font-black text-gray-900 dark:text-white mt-0.5">{isStoreInTrial ? '0% (Mes Gratis)' : `${(store.commissionRate * 100)}%`}</p>
           </div>
         </div>
 
@@ -246,28 +257,51 @@ export default function MerchantDashboard() {
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         
         {/* Sales Chart */}
-        <div className="lg:col-span-2 bg-white dark:bg-gray-800/80 p-5 border border-gray-150/45 dark:border-gray-700/60 rounded-3xl shadow-sm space-y-4">
+        <div className="lg:col-span-2 bg-white dark:bg-gray-800/80 p-5 border border-gray-150/45 dark:border-gray-700/60 rounded-3xl shadow-sm space-y-4 relative overflow-hidden">
           <div>
             <h3 className="font-extrabold text-lg">Historial de Ventas</h3>
             <p className="text-xs text-gray-400 font-medium">Facturación de los últimos 7 días</p>
           </div>
-          <div className="h-64">
-            <ResponsiveContainer width="100%" height="100%">
-              <AreaChart data={chartData}>
-                <defs>
-                  <linearGradient id="colorSales" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="#f97316" stopOpacity={0.4}/>
-                    <stop offset="95%" stopColor="#f97316" stopOpacity={0}/>
-                  </linearGradient>
-                </defs>
-                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#E5E7EB" className="dark:stroke-gray-700" />
-                <XAxis dataKey="name" stroke="#9CA3AF" fontSize={11} tickLine={false} />
-                <YAxis stroke="#9CA3AF" fontSize={11} tickLine={false} axisLine={false} tickFormatter={(v) => `$${v/1000}k`} />
-                <Tooltip formatter={(value) => [`$${value.toLocaleString('es-CO')}`, 'Facturado']} labelClassName="text-gray-700 dark:text-gray-300 font-bold" />
-                <Area type="monotone" dataKey="Ventas" stroke="#f97316" strokeWidth={2.5} fillOpacity={1} fill="url(#colorSales)" />
-              </AreaChart>
-            </ResponsiveContainer>
-          </div>
+          {store.plan === 'PRO' ? (
+            <div className="h-64">
+              <ResponsiveContainer width="100%" height="100%">
+                <AreaChart data={chartData}>
+                  <defs>
+                    <linearGradient id="colorSales" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="5%" stopColor="#f97316" stopOpacity={0.4}/>
+                      <stop offset="95%" stopColor="#f97316" stopOpacity={0}/>
+                    </linearGradient>
+                  </defs>
+                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#E5E7EB" className="dark:stroke-gray-700" />
+                  <XAxis dataKey="name" stroke="#9CA3AF" fontSize={11} tickLine={false} />
+                  <YAxis stroke="#9CA3AF" fontSize={11} tickLine={false} axisLine={false} tickFormatter={(v) => `$${v/1000}k`} />
+                  <Tooltip formatter={(value) => [`$${value.toLocaleString('es-CO')}`, 'Facturado']} labelClassName="text-gray-700 dark:text-gray-300 font-bold" />
+                  <Area type="monotone" dataKey="Ventas" stroke="#f97316" strokeWidth={2.5} fillOpacity={1} fill="url(#colorSales)" />
+                </AreaChart>
+              </ResponsiveContainer>
+            </div>
+          ) : (
+            <div className="h-64 flex flex-col items-center justify-center text-center p-6 relative">
+              <div className="absolute inset-0 bg-white/40 dark:bg-gray-800/40 backdrop-blur-[4px] z-0 rounded-2xl" />
+              <div className="z-10 flex flex-col items-center max-w-sm">
+                <div className="w-12 h-12 bg-purple-50 dark:bg-purple-950/30 text-purple-600 dark:text-purple-400 rounded-2xl flex items-center justify-center shadow-inner mb-3">
+                  <Lock size={20} />
+                </div>
+                <h4 className="font-extrabold text-sm text-gray-800 dark:text-white mb-1">Gráficos de Ventas Exclusivos de PRO</h4>
+                <p className="text-xs text-gray-500 dark:text-gray-400 leading-relaxed mb-4">
+                  Visualiza el gráfico interactivo de tus ventas diarias de la semana, tendencias y picos de venta.
+                </p>
+                <a
+                  href={`https://wa.me/573001234567?text=${encodeURIComponent(`Hola, deseo solicitar el ascenso a Plan PRO para mi tienda "${store.name}" para ver los gráficos de ventas.`)}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="px-4 py-2 bg-gradient-to-r from-purple-500 to-indigo-600 text-white rounded-xl text-xs font-black shadow-sm flex items-center gap-1 hover:opacity-90"
+                >
+                  <Sparkles size={12} /> Habilitar con Plan PRO
+                </a>
+              </div>
+            </div>
+          )}
         </div>
 
         {/* Plan Expiry / Info */}
@@ -291,7 +325,7 @@ export default function MerchantDashboard() {
               </div>
               <div className="flex items-center justify-between text-sm">
                 <span className="text-gray-500 font-semibold flex items-center gap-1.5"><Percent size={16} /> Tasa de Comisión</span>
-                <span className="font-bold">{(store.commissionRate * 100)}% por compra</span>
+                <span className="font-bold">{isStoreInTrial ? '0% (Mes de Prueba Gratis)' : `${(store.commissionRate * 100)}% por compra`}</span>
               </div>
               {store.plan === 'FREE' && (
                 <div className="bg-orange-50/50 dark:bg-orange-950/10 border border-orange-100/50 dark:border-orange-900/20 rounded-2xl p-3 text-[11px] text-orange-600 dark:text-orange-400 leading-relaxed font-semibold">

@@ -33,6 +33,22 @@ export class ProductsService {
     });
   }
 
+  async findAllForUser(userId: string) {
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { storeId: true },
+    });
+
+    return this.prisma.product.findMany({
+      where: {
+        active: true,
+        storeId: user?.storeId || null,
+      },
+      include: { vitrinaStock: true, store: true },
+      orderBy: { name: 'asc' },
+    });
+  }
+
   async findOne(id: string) {
     return this.prisma.product.findUniqueOrThrow({
       where: { id },
@@ -40,17 +56,27 @@ export class ProductsService {
     });
   }
 
-  async create(dto: CreateProductDto, storeId?: string) {
-    if (storeId) {
-      const store = await this.prisma.store.findUnique({ where: { id: storeId } });
+  async create(dto: CreateProductDto, storeId?: string, ownerId?: string) {
+    let targetStoreId = storeId;
+    if (!targetStoreId && ownerId) {
+      const store = await this.prisma.store.findUnique({ where: { ownerId } });
+      if (store) targetStoreId = store.id;
+    }
+
+    let isIndependentStore = false;
+    if (targetStoreId) {
+      const store = await this.prisma.store.findUnique({ where: { id: targetStoreId } });
       if (!store) throw new NotFoundException('Tienda no encontrada');
+      if (store.name !== 'Donde Salo!') {
+        isIndependentStore = true;
+      }
 
       if (store.plan === 'FREE') {
         const activeCount = await this.prisma.product.count({
-          where: { storeId, active: true }
+          where: { storeId: targetStoreId, active: true }
         });
-        if (activeCount >= 10) {
-          throw new BadRequestException('El plan gratuito está limitado a un máximo de 10 productos activos');
+        if (activeCount >= 50) {
+          throw new BadRequestException('El plan gratuito está limitado a un máximo de 50 productos activos');
         }
       }
 
@@ -69,34 +95,40 @@ export class ProductsService {
         type: dto.type,
         preparationMode: (dto.preparationMode as any) ?? 'VITRINA',
         dailyStock: dto.dailyStock ?? 0,
+        saleType: dto.saleType ?? 'UNIT',
+        prices: dto.prices,
         supplier: dto.supplierId ? { connect: { id: dto.supplierId } } : undefined,
-        store: storeId ? { connect: { id: storeId } } : undefined,
+        store: targetStoreId ? { connect: { id: targetStoreId } } : undefined,
       },
     });
 
     // Si es vitrina, inicializar stock
     if (product.preparationMode === 'VITRINA') {
-      const initialStock = product.type === 'SUPPLIER' ? product.dailyStock : 0;
+      const initialStock = (isIndependentStore || product.type === 'SUPPLIER') ? product.dailyStock : 0;
       await this.prisma.vitrinaStock.create({
         data: { productId: product.id, qty: initialStock },
       });
 
-      // Si es propio de vitrina, crear orden de producción automáticamente en cocina
-      if (product.type === 'OWN' && product.dailyStock > 0) {
-        await this.prisma.productionOrder.create({
-          data: {
-            productId: product.id,
-            requestedQty: product.dailyStock,
-            readyQty: 0,
-            userId: 'system',
-          },
-        });
-      } else if (product.type === 'SUPPLIER' && product.dailyStock > 0) {
-        // Si es proveedor, registrar stock recibido
-        await this.prisma.product.update({
-          where: { id: product.id },
-          data: { supplierReceivedQty: product.dailyStock },
-        });
+      if (isIndependentStore) {
+        // No creamos órdenes de producción para tiendas independientes
+      } else {
+        // Si es propio de vitrina, crear orden de producción automáticamente en cocina
+        if (product.type === 'OWN' && product.dailyStock > 0) {
+          await this.prisma.productionOrder.create({
+            data: {
+              productId: product.id,
+              requestedQty: product.dailyStock,
+              readyQty: 0,
+              userId: 'system',
+            },
+          });
+        } else if (product.type === 'SUPPLIER' && product.dailyStock > 0) {
+          // Si es proveedor, registrar stock recibido
+          await this.prisma.product.update({
+            where: { id: product.id },
+            data: { supplierReceivedQty: product.dailyStock },
+          });
+        }
       }
     }
 
@@ -111,7 +143,14 @@ export class ProductsService {
 
   async update(id: string, dto: UpdateProductDto, userId?: string, isAdmin?: boolean, storeId?: string) {
     const current = await this.prisma.product.findUniqueOrThrow({ where: { id }, include: { vitrinaStock: true } });
-    if (!isAdmin && current.storeId && current.storeId !== storeId) {
+    
+    let targetStoreId = storeId;
+    if (!targetStoreId && userId && !isAdmin) {
+      const store = await this.prisma.store.findUnique({ where: { ownerId: userId } });
+      if (store) targetStoreId = store.id;
+    }
+
+    if (!isAdmin && current.storeId && current.storeId !== targetStoreId) {
       throw new BadRequestException('No tienes permiso para modificar este producto');
     }
 
@@ -122,8 +161,8 @@ export class ProductsService {
           const activeCount = await this.prisma.product.count({
             where: { storeId: current.storeId, active: true }
           });
-          if (activeCount >= 10) {
-            throw new BadRequestException('El plan gratuito está limitado a un máximo de 10 productos activos');
+          if (activeCount >= 50) {
+            throw new BadRequestException('El plan gratuito está limitado a un máximo de 50 productos activos');
           }
         }
         if (new Date() > store.planExpiresAt && store.balance < 5000) {
@@ -142,65 +181,88 @@ export class ProductsService {
         costPrice: dto.costPrice,
         type: dto.type,
         dailyStock: dto.dailyStock,
+        saleType: dto.saleType,
+        prices: dto.prices,
         preparationMode: dto.preparationMode as any,
         supplier: dto.supplierId ? { connect: { id: dto.supplierId } } : (dto.type === 'OWN' ? { disconnect: true } : undefined),
         active: dto.active,
       },
     });
 
+    let isIndependentStore = false;
+    if (product.storeId) {
+      const store = await this.prisma.store.findUnique({ where: { id: product.storeId } });
+      if (store && store.name !== 'Donde Salo!') {
+        isIndependentStore = true;
+      }
+    }
+
     // Si cambia a VITRINA y no tiene stock, crearlo
     if (product.preparationMode === 'VITRINA' && !current.vitrinaStock) {
+      const initialQty = (isIndependentStore && dto.dailyStock !== undefined) ? dto.dailyStock : 0;
       await this.prisma.vitrinaStock.upsert({
         where: { productId: id },
-        create: { productId: id, qty: 0 },
+        create: { productId: id, qty: initialQty },
         update: {},
       });
     }
 
-    // Si es propio de vitrina y tiene dailyStock, sincronizar con cocina
-    if (product.preparationMode === 'VITRINA' && product.type === 'OWN' && dto.dailyStock !== undefined) {
-      const now = new Date();
-      const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-      const endOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
-
-      const todayOrder = await this.prisma.productionOrder.findFirst({
-        where: {
-          productId: id,
-          createdAt: {
-            gte: startOfDay,
-            lte: endOfDay,
-          },
-        },
-      });
-
-      if (todayOrder) {
-        await this.prisma.productionOrder.update({
-          where: { id: todayOrder.id },
-          data: { requestedQty: dto.dailyStock },
-        });
-      } else if (dto.dailyStock > 0) {
-        await this.prisma.productionOrder.create({
-          data: {
-            productId: id,
-            requestedQty: dto.dailyStock,
-            readyQty: 0,
-            userId: 'system',
-          },
+    if (isIndependentStore) {
+      // Para tiendas independientes, sincronizamos el stock directamente
+      if (product.preparationMode === 'VITRINA' && dto.dailyStock !== undefined) {
+        await this.prisma.vitrinaStock.upsert({
+          where: { productId: id },
+          create: { productId: id, qty: dto.dailyStock },
+          update: { qty: dto.dailyStock },
         });
       }
-    }
+    } else {
+      // Lógica original de Donde Salo! (Cocina para OWN, directo para SUPPLIER)
+      // Si es propio de vitrina y tiene dailyStock, sincronizar con cocina
+      if (product.preparationMode === 'VITRINA' && product.type === 'OWN' && dto.dailyStock !== undefined) {
+        const now = new Date();
+        const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+        const endOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
 
-    // Si es proveedor y tiene dailyStock, cargar directamente en el stock
-    if (product.preparationMode === 'VITRINA' && product.type === 'SUPPLIER' && dto.dailyStock !== undefined) {
-      await this.prisma.product.update({
-        where: { id },
-        data: { supplierReceivedQty: dto.dailyStock },
-      });
-      await this.prisma.vitrinaStock.upsert({
-        where: { productId: id },
-        create: { productId: id, qty: dto.dailyStock },
-        update: { qty: dto.dailyStock },
-      });
+        const todayOrder = await this.prisma.productionOrder.findFirst({
+          where: {
+            productId: id,
+            createdAt: {
+              gte: startOfDay,
+              lte: endOfDay,
+            },
+          },
+        });
+
+        if (todayOrder) {
+          await this.prisma.productionOrder.update({
+            where: { id: todayOrder.id },
+            data: { requestedQty: dto.dailyStock },
+          });
+        } else if (dto.dailyStock > 0) {
+          await this.prisma.productionOrder.create({
+            data: {
+              productId: id,
+              requestedQty: dto.dailyStock,
+              readyQty: 0,
+              userId: 'system',
+            },
+          });
+        }
+      }
+
+      // Si es proveedor y tiene dailyStock, cargar directamente en el stock
+      if (product.preparationMode === 'VITRINA' && product.type === 'SUPPLIER' && dto.dailyStock !== undefined) {
+        await this.prisma.product.update({
+          where: { id },
+          data: { supplierReceivedQty: dto.dailyStock },
+        });
+        await this.prisma.vitrinaStock.upsert({
+          where: { productId: id },
+          create: { productId: id, qty: dto.dailyStock },
+          update: { qty: dto.dailyStock },
+        });
+      }
     }
 
     const result = await this.prisma.product.findUniqueOrThrow({

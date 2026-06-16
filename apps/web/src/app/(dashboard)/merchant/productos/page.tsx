@@ -27,6 +27,8 @@ interface Product {
   preparationMode: 'VITRINA' | 'PREPARADO';
   active: boolean;
   dailyStock: number;
+  saleType: string;
+  prices: string | null;
   photoUrl: string | null;
   storeId: string | null;
 }
@@ -45,6 +47,7 @@ export default function MerchantProductsPage() {
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
   const [file, setFile] = useState<File | null>(null);
   const [preview, setPreview] = useState<string | null>(null);
+  const [variants, setVariants] = useState<Array<{ label: string; price: number }>>([]);
 
   // Form state
   const [formData, setFormData] = useState({
@@ -54,7 +57,9 @@ export default function MerchantProductsPage() {
     costPrice: 0,
     type: 'OWN',
     preparationMode: 'VITRINA' as 'VITRINA' | 'PREPARADO',
-    dailyStock: 0,
+    dailyStock: 99999,
+    saleType: 'UNIT', // UNIT | WEIGHT | MENUDEO
+    prices: '',
     photoUrl: '',
     active: true,
   });
@@ -83,10 +88,13 @@ export default function MerchantProductsPage() {
       costPrice: 0,
       type: 'OWN',
       preparationMode: 'VITRINA',
-      dailyStock: 0,
+      dailyStock: 99999,
+      saleType: 'UNIT',
+      prices: '',
       photoUrl: '',
       active: true,
     });
+    setVariants([]);
     setFile(null);
     setPreview(null);
     setShowModal(true);
@@ -94,6 +102,15 @@ export default function MerchantProductsPage() {
 
   const handleOpenEdit = (prod: Product) => {
     setEditingProduct(prod);
+    let parsedVariants: any[] = [];
+    try {
+      if (prod.prices) {
+        parsedVariants = JSON.parse(prod.prices);
+      }
+    } catch (e) {
+      console.error('Error parsing prices JSON:', e);
+    }
+    setVariants(parsedVariants);
     setFormData({
       name: prod.name,
       description: prod.description || '',
@@ -102,6 +119,8 @@ export default function MerchantProductsPage() {
       type: prod.type,
       preparationMode: prod.preparationMode,
       dailyStock: prod.dailyStock,
+      saleType: prod.saleType || 'UNIT',
+      prices: prod.prices || '',
       photoUrl: prod.photoUrl || '',
       active: prod.active,
     });
@@ -116,8 +135,8 @@ export default function MerchantProductsPage() {
     // If turning on, check FREE plan limit
     if (!prod.active && store.plan === 'FREE') {
       const activeCount = store.products.filter((p) => p.active).length;
-      if (activeCount >= 10) {
-        toast.error('El plan gratuito está limitado a un máximo de 10 productos activos');
+      if (activeCount >= 50) {
+        toast.error('El plan gratuito está limitado a un máximo de 50 productos activos');
         return;
       }
     }
@@ -140,8 +159,8 @@ export default function MerchantProductsPage() {
 
     if (!editingProduct && store?.plan === 'FREE' && formData.active) {
       const activeCount = store.products.filter((p) => p.active).length;
-      if (activeCount >= 10) {
-        toast.error('El plan gratuito está limitado a un máximo de 10 productos activos');
+      if (activeCount >= 50) {
+        toast.error('El plan gratuito está limitado a un máximo de 50 productos activos');
         return;
       }
     }
@@ -162,11 +181,13 @@ export default function MerchantProductsPage() {
       finalPhoto = 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?w=400';
     }
 
+    const calculatedSalePrice = (formData.saleType === 'UNIT' && variants.length > 0) ? Number(variants[0].price) : Number(formData.salePrice);
     const payload = {
       ...formData,
-      salePrice: Number(formData.salePrice),
+      salePrice: calculatedSalePrice,
       costPrice: Number(formData.costPrice),
       dailyStock: Number(formData.dailyStock),
+      prices: (formData.saleType === 'UNIT' && variants.length > 0) ? JSON.stringify(variants) : null,
       photoUrl: finalPhoto,
     };
 
@@ -217,7 +238,7 @@ export default function MerchantProductsPage() {
           <div>
             <h4 className="font-extrabold text-orange-800 dark:text-orange-400">Límite de Plan Básico</h4>
             <p className="text-xs text-orange-700 dark:text-orange-300 leading-relaxed mt-1">
-              Tienes <strong className="text-orange-900 dark:text-orange-200">{activeProducts.length} de 10</strong> productos activos. Desactiva productos antiguos si necesitas publicar nuevos productos en el catálogo de tu tienda.
+              Tienes <strong className="text-orange-900 dark:text-orange-200">{activeProducts.length} de 50</strong> productos activos. Desactiva productos antiguos si necesitas publicar nuevos productos en el catálogo de tu tienda.
             </p>
           </div>
         </div>
@@ -298,17 +319,33 @@ export default function MerchantProductsPage() {
                 />
               </div>
 
+              <div>
+                <label className="block text-xs font-extrabold uppercase text-gray-400 tracking-wider mb-1">Tipo de Venta</label>
+                <select
+                  value={formData.saleType}
+                  onChange={(e) => setFormData({ ...formData, saleType: e.target.value })}
+                  className="w-full px-4 py-3 rounded-xl border border-gray-200 dark:border-gray-750 bg-gray-50 dark:bg-gray-750 text-sm outline-none focus:ring-2 focus:ring-orange-400 transition"
+                >
+                  <option value="UNIT">Por Unidad</option>
+                  <option value="WEIGHT">Por Peso (Kg / Lb)</option>
+                  <option value="MENUDEO">Menudeo / Porción (Precio Libre)</option>
+                </select>
+              </div>
+
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-xs font-extrabold uppercase text-gray-400 tracking-wider mb-1">Precio Venta *</label>
+                  <label className="block text-xs font-extrabold uppercase text-gray-400 tracking-wider mb-1">
+                    {formData.saleType === 'WEIGHT' ? 'Precio por Kg/Libra *' : 'Precio Venta *'}
+                  </label>
                   <input
                     type="number"
-                    required
+                    required={formData.saleType !== 'MENUDEO'}
+                    disabled={formData.saleType === 'UNIT' && variants.length > 0}
                     min={0}
-                    placeholder="Ej: 3000"
-                    value={formData.salePrice || ''}
+                    placeholder={formData.saleType === 'UNIT' && variants.length > 0 ? 'Definido en variantes' : 'Ej: 3000'}
+                    value={(formData.saleType === 'UNIT' && variants.length > 0) ? '' : (formData.salePrice || '')}
                     onChange={(e) => setFormData({ ...formData, salePrice: Number(e.target.value) })}
-                    className="w-full px-4 py-3 rounded-xl border border-gray-200 dark:border-gray-750 bg-gray-50 dark:bg-gray-750 text-sm outline-none focus:ring-2 focus:ring-orange-400 transition"
+                    className="w-full px-4 py-3 rounded-xl border border-gray-200 dark:border-gray-750 bg-gray-50 dark:bg-gray-750 text-sm outline-none focus:ring-2 focus:ring-orange-400 disabled:opacity-50 transition"
                   />
                 </div>
                 <div>
@@ -323,6 +360,80 @@ export default function MerchantProductsPage() {
                   />
                 </div>
               </div>
+
+              {formData.saleType === 'UNIT' && (
+                <div className="space-y-3 pt-2">
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="checkbox"
+                      id="hasVariants"
+                      checked={variants.length > 0}
+                      onChange={(e) => {
+                        if (e.target.checked) {
+                          setVariants([{ label: 'Normal', price: formData.salePrice || 0 }]);
+                        } else {
+                          setVariants([]);
+                        }
+                      }}
+                      className="w-4 h-4 text-orange-500 border-gray-300 rounded focus:ring-orange-500"
+                    />
+                    <label htmlFor="hasVariants" className="text-sm font-bold text-gray-700 dark:text-gray-300">
+                      Tiene múltiples precios / variantes
+                    </label>
+                  </div>
+
+                  {variants.length > 0 && (
+                    <div className="space-y-2 border border-gray-100 dark:border-gray-750 p-3 rounded-2xl bg-gray-50/50 dark:bg-gray-750/30">
+                      <label className="block text-xs font-extrabold uppercase text-gray-400 tracking-wider">Variantes y Precios</label>
+                      {variants.map((variant, index) => (
+                        <div key={index} className="flex gap-2 items-center">
+                          <input
+                            type="text"
+                            placeholder="Ej: Mediana"
+                            required
+                            value={variant.label}
+                            onChange={(e) => {
+                              const newVariants = [...variants];
+                              newVariants[index].label = e.target.value;
+                              setVariants(newVariants);
+                            }}
+                            className="flex-1 px-3 py-2 rounded-xl border border-gray-200 dark:border-gray-750 bg-white dark:bg-gray-700 text-sm outline-none focus:ring-2 focus:ring-orange-400 transition"
+                          />
+                          <input
+                            type="number"
+                            placeholder="Precio"
+                            required
+                            min={0}
+                            value={variant.price || ''}
+                            onChange={(e) => {
+                              const newVariants = [...variants];
+                              newVariants[index].price = Number(e.target.value);
+                              setVariants(newVariants);
+                            }}
+                            className="w-28 px-3 py-2 rounded-xl border border-gray-200 dark:border-gray-750 bg-white dark:bg-gray-700 text-sm outline-none focus:ring-2 focus:ring-orange-400 transition"
+                          />
+                          {variants.length > 1 && (
+                            <button
+                              type="button"
+                              onClick={() => setVariants(variants.filter((_, i) => i !== index))}
+                              className="p-2 text-red-500 hover:bg-red-50 dark:hover:bg-red-950/20 rounded-lg transition"
+                            >
+                              <Trash2 size={16} />
+                            </button>
+                          )}
+                        </div>
+                      ))}
+                      <button
+                        type="button"
+                        onClick={() => setVariants([...variants, { label: '', price: 0 }])}
+                        className="text-xs font-bold text-orange-500 hover:text-orange-600 flex items-center gap-1 mt-1 transition"
+                      >
+                        <Plus size={14} /> Agregar Variante
+                      </button>
+                    </div>
+                  )}
+                </div>
+              )}
 
               {store?.plan === 'PRO' && (
                 <div className="grid grid-cols-2 gap-4 border-t border-gray-100 dark:border-gray-750 pt-3">
@@ -375,19 +486,7 @@ export default function MerchantProductsPage() {
                 )}
               </div>
 
-              <div>
-                <label className="block text-xs font-extrabold uppercase text-gray-400 tracking-wider mb-1">O URL de Foto</label>
-                <div className="relative">
-                  <ImageIcon size={18} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-gray-400" />
-                  <input
-                    type="text"
-                    placeholder="O ingresa un enlace externo"
-                    value={formData.photoUrl}
-                    onChange={(e) => setFormData({ ...formData, photoUrl: e.target.value })}
-                    className="w-full pl-11 pr-4 py-3 rounded-xl border border-gray-200 dark:border-gray-750 bg-gray-50 dark:bg-gray-750 text-sm outline-none focus:ring-2 focus:ring-orange-400 transition"
-                  />
-                </div>
-              </div>
+
 
               <div className="flex items-center gap-3 pt-3 border-t border-gray-100 dark:border-gray-750">
                 <input
@@ -433,6 +532,26 @@ function ProductCard({
   onEdit: (p: Product) => void;
   onToggle: (p: Product) => void;
 }) {
+  let priceDisplay = formatCurrency(product.salePrice);
+  let badgeText = '';
+  if (product.saleType === 'WEIGHT') {
+    priceDisplay = `${formatCurrency(product.salePrice)} / Kg`;
+    badgeText = 'Por Peso';
+  } else if (product.saleType === 'MENUDEO') {
+    priceDisplay = 'Precio Libre';
+    badgeText = 'Menudeo';
+  } else if (product.prices) {
+    try {
+      const parsed = JSON.parse(product.prices);
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        const minPrice = Math.min(...parsed.map((v: any) => v.price));
+        const maxPrice = Math.max(...parsed.map((v: any) => v.price));
+        priceDisplay = minPrice === maxPrice ? formatCurrency(minPrice) : `${formatCurrency(minPrice)} - ${formatCurrency(maxPrice)}`;
+        badgeText = 'Variantes';
+      }
+    } catch (e) {}
+  }
+
   return (
     <div className="bg-white dark:bg-gray-800 rounded-3xl p-4 border border-gray-150/40 dark:border-gray-750/70 shadow-xs flex flex-col justify-between hover:shadow-sm transition">
       <div className="space-y-3">
@@ -442,9 +561,16 @@ function ProductCard({
           ) : (
             <div className="w-full h-full flex items-center justify-center text-gray-400 text-xs"><Package size={28} /></div>
           )}
-          <span className="absolute top-2.5 right-2.5 px-2 py-0.5 rounded-md text-[9px] font-black uppercase tracking-wider bg-black/60 text-white backdrop-blur-xs">
-            {product.preparationMode}
-          </span>
+          <div className="absolute top-2.5 right-2.5 flex flex-col gap-1 items-end">
+            <span className="px-2 py-0.5 rounded-md text-[9px] font-black uppercase tracking-wider bg-black/60 text-white backdrop-blur-xs">
+              {product.preparationMode}
+            </span>
+            {badgeText && (
+              <span className="px-2 py-0.5 rounded-md text-[9px] font-black uppercase tracking-wider bg-orange-500 text-white shadow-xs">
+                {badgeText}
+              </span>
+            )}
+          </div>
         </div>
         <div className="space-y-1">
           <h3 className="font-extrabold text-base text-gray-900 dark:text-white truncate">{product.name}</h3>
@@ -455,7 +581,7 @@ function ProductCard({
       <div className="mt-4 pt-3 border-t border-gray-100 dark:border-gray-750 flex items-center justify-between">
         <div className="space-y-0.5">
           <p className="text-[10px] text-gray-400 font-bold uppercase tracking-wider">Precio</p>
-          <p className="text-base font-black text-orange-500">{formatCurrency(product.salePrice)}</p>
+          <p className="text-base font-black text-orange-500">{priceDisplay}</p>
         </div>
         <div className="flex items-center gap-2">
           <button

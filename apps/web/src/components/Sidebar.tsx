@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { useAuthStore } from '@/store/auth';
 import { cn } from '@/lib/utils';
+import { api } from '@/lib/api';
 import {
   LayoutDashboard,
   ShoppingCart,
@@ -27,6 +28,7 @@ import {
   DollarSign,
   Smartphone,
   Apple,
+  Megaphone,
 } from 'lucide-react';
 import { useState, useEffect } from 'react';
 
@@ -52,7 +54,14 @@ const adminLinks = [
 const merchantLinks = [
   { href: '/merchant', label: 'Dashboard', icon: LayoutDashboard },
   { href: '/merchant/productos', label: 'Mis Productos', icon: Package },
-  { href: '/merchant/staff', label: 'Mi Personal', icon: Users },
+  { href: '/merchant/domicilios', label: 'Domicilios', icon: Bike, proOnly: true },
+  { href: '/merchant/promocionales', label: 'Publicidad / Banners', icon: Megaphone, proOnly: true },
+  { href: '/merchant/staff', label: 'Mi Personal', icon: Users, proOnly: true },
+  { href: '/merchant/inventario', label: 'Inventario (Kardex)', icon: Grid3X3, proOnly: true },
+  { href: '/merchant/clientes', label: 'CRM Clientes', icon: Users, proOnly: true },
+  { href: '/merchant/reportes', label: 'Reportes Avanzados', icon: Calculator, proOnly: true },
+  { href: '/merchant/facturacion', label: 'Facturas / Cotizaciones', icon: Receipt, proOnly: true },
+  { href: '/merchant/gastos', label: 'Gastos / Flujo', icon: DollarSign, proOnly: true },
   { href: '/merchant/configuracion', label: 'Configuración', icon: Settings },
 ];
 
@@ -73,10 +82,21 @@ export function Sidebar() {
   const [isDark, setIsDark] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
   const [showDownloadModal, setShowDownloadModal] = useState(false);
+  const [storePlan, setStorePlan] = useState<'FREE' | 'PRO'>('FREE');
 
   useEffect(() => {
     setIsDark(document.documentElement.classList.contains('dark'));
   }, []);
+
+  useEffect(() => {
+    if (user?.role === 'MERCHANT' || user?.role === 'MERCHANT_STAFF') {
+      api.get<{ plan: 'FREE' | 'PRO' }>('/stores/my-store')
+        .then((res) => {
+          setStorePlan(res.plan);
+        })
+        .catch(() => {});
+    }
+  }, [user]);
 
   const toggleDark = () => {
     const next = !isDark;
@@ -129,10 +149,16 @@ export function Sidebar() {
             )}
           >
             <link.icon size={20} />
-            {link.label}
+            <span className="flex-1 text-left">{link.label}</span>
+            {(link as any).proOnly && storePlan === 'FREE' && (
+              <span className="text-[9px] font-black uppercase bg-orange-100 dark:bg-orange-950/40 text-orange-600 dark:text-orange-400 px-1.5 py-0.5 rounded-md flex items-center gap-0.5 border border-orange-200/30 shrink-0">
+                PRO 🔒
+              </span>
+            )}
           </Link>
         ))}
       </nav>
+
 
       <div className="p-3 border-t border-gray-200 dark:border-gray-700 space-y-1">
         <button

@@ -42,4 +42,12 @@ export class UpdateProductDto {
 
   @IsOptional()
   active?: boolean;
+
+  @IsString()
+  @IsOptional()
+  saleType?: string;
+
+  @IsString()
+  @IsOptional()
+  prices?: string;
 }

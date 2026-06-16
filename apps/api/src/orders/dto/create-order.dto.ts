@@ -49,4 +49,8 @@ export class CreateOrderDto {
   @IsString()
   @IsOptional()
   storeId?: string;
+
+  @IsString()
+  @IsOptional()
+  customerDoc?: string;
 }

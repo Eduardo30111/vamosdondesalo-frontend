@@ -5,18 +5,28 @@ import { PrismaService } from '../prisma/prisma.service';
 export class ExpensesService {
   constructor(private prisma: PrismaService) {}
 
-  findAll(type?: string) {
+  async findAll(type?: string, storeId?: string) {
     const where: any = {};
     if (type) where.type = type;
+    if (storeId) {
+      const users = await this.prisma.user.findMany({ where: { storeId } });
+      const userIds = users.map((u) => u.id);
+      where.userId = { in: userIds };
+    }
     return this.prisma.expense.findMany({
       where,
       orderBy: { date: 'desc' },
     });
   }
 
-  findByDateRange(from: Date, to: Date, type?: string) {
+  async findByDateRange(from: Date, to: Date, type?: string, storeId?: string) {
     const where: any = { date: { gte: from, lte: to } };
     if (type) where.type = type;
+    if (storeId) {
+      const users = await this.prisma.user.findMany({ where: { storeId } });
+      const userIds = users.map((u) => u.id);
+      where.userId = { in: userIds };
+    }
     return this.prisma.expense.findMany({
       where,
       orderBy: { date: 'desc' },

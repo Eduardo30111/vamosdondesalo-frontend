@@ -35,6 +35,21 @@ async function bootstrap() {
   // Serve uploaded files from /uploads when using platform-express
   const uploadsPath = join(process.cwd(), 'uploads');
   try {
+    const expressApp = app.getHttpAdapter().getInstance();
+    const fs = require('fs');
+    const path = require('path');
+    
+    // Intercept requests to /uploads to serve placeholder if local file is missing (e.g. after Render restart)
+    expressApp.use('/uploads', (req: any, res: any, next: any) => {
+      const filePath = path.join(uploadsPath, req.path);
+      fs.access(filePath, fs.constants.F_OK, (err: any) => {
+        if (err) {
+          return res.redirect('https://placehold.co/600x400/f3f4f6/374151?text=Vamos+Donde+Salo');
+        }
+        next();
+      });
+    });
+
     // `useStaticAssets` exists on the Express adapter
     // eslint-disable-next-line @typescript-eslint/ban-ts-comment
     // @ts-ignore

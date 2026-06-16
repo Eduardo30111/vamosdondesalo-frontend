@@ -28,4 +28,16 @@ export class UploadController {
     }
     return this.uploadService.uploadImage(file, req);
   }
+
+  @Post('promo-media')
+  @Roles('ADMIN', 'MERCHANT')
+  @UseInterceptors(FileInterceptor('file', {
+    limits: { fileSize: 20 * 1024 * 1024 },
+  }))
+  async uploadPromoMedia(@UploadedFile() file: any, @Request() req: any) {
+    if (!file) {
+      return { error: 'No se proporcionó archivo' };
+    }
+    return this.uploadService.uploadPromoMedia(file, req);
+  }
 }

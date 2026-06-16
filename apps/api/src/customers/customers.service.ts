@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 
 @Injectable()
@@ -142,5 +142,20 @@ export class CustomersService {
       })
     ]);
     return { success: true };
+  }
+
+  async update(id: string, data: { name: string; cedula: string; phone?: string }) {
+    const existing = await this.prisma.customer.findUnique({ where: { cedula: data.cedula } });
+    if (existing && existing.id !== id) {
+      throw new BadRequestException('La cédula ya está registrada con otro cliente');
+    }
+    return this.prisma.customer.update({
+      where: { id },
+      data: {
+        name: data.name,
+        cedula: data.cedula,
+        phone: data.phone || null,
+      },
+    });
   }
 }

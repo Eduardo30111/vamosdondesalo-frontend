@@ -11,7 +11,7 @@ export class AccountingService {
     const endOfDay = new Date(date);
     endOfDay.setHours(23, 59, 59, 999);
 
-    const [sales, payments, expenses, wastes, monthlyExpenses] = await Promise.all([
+    const [sales, payments, expenses, wastes, monthlyExpenses, credits] = await Promise.all([
       // Total sales (orders that are paid)
       this.prisma.order.aggregate({
         where: {
@@ -42,6 +42,10 @@ export class AccountingService {
         where: { type: 'MONTHLY' },
         _sum: { amount: true },
       }),
+      // Credits/Fiados of the day
+      this.prisma.credit.findMany({
+        where: { createdAt: { gte: startOfDay, lte: endOfDay } },
+      }),
     ]);
 
     // Calculate supplier costs from sold items
@@ -58,9 +62,17 @@ export class AccountingService {
     const netProfit = totalSales - supplierCosts - wasteCost - dailyExpenses - monthlyExpensesProrated;
     const margin = totalSales > 0 ? (netProfit / totalSales) * 100 : 0;
 
-    // Expected cash = cash payments of the day
+    const totalFiado = credits
+      .filter(c => c.type === 'CHARGE')
+      .reduce((sum, c) => sum + c.amount, 0);
+
+    const totalAbonos = credits
+      .filter(c => c.type === 'PAYMENT')
+      .reduce((sum, c) => sum + c.amount, 0);
+
+    // Expected cash = cash payments of the day + total abonos
     const cashPayments = payments.find(p => p.method === 'CASH');
-    const expectedCash = cashPayments?._sum.amount || 0;
+    const expectedCash = (cashPayments?._sum.amount || 0) + totalAbonos;
 
     return {
       date: startOfDay.toISOString(),
@@ -74,6 +86,8 @@ export class AccountingService {
       netProfit: Math.round(netProfit),
       margin: Math.round(margin * 100) / 100,
       expectedCash,
+      totalFiado,
+      totalAbonos,
     };
   }
 
@@ -82,7 +96,7 @@ export class AccountingService {
     const endOfMonth = new Date(year, month, 0, 23, 59, 59, 999);
     const daysInMonth = new Date(year, month, 0).getDate();
 
-    const [sales, payments, dailyExpenses, monthlyExpenses, wastes] = await Promise.all([
+    const [sales, payments, dailyExpenses, monthlyExpenses, wastes, creditsMonth] = await Promise.all([
       this.prisma.order.aggregate({
         where: {
           createdAt: { gte: startOfMonth, lte: endOfMonth },
@@ -108,6 +122,9 @@ export class AccountingService {
         where: { createdAt: { gte: startOfMonth, lte: endOfMonth } },
         include: { product: { select: { costPrice: true } } },
       }),
+      this.prisma.credit.findMany({
+        where: { createdAt: { gte: startOfMonth, lte: endOfMonth } },
+      }),
     ]);
 
     const orderItems = await this.prisma.orderItem.findMany({
@@ -123,6 +140,14 @@ export class AccountingService {
     const netProfit = totalSales - supplierCosts - wasteCost - totalDailyExpenses - totalMonthlyExpenses;
     const margin = totalSales > 0 ? (netProfit / totalSales) * 100 : 0;
 
+    const totalFiado = creditsMonth
+      .filter(c => c.type === 'CHARGE')
+      .reduce((sum, c) => sum + c.amount, 0);
+
+    const totalAbonos = creditsMonth
+      .filter(c => c.type === 'PAYMENT')
+      .reduce((sum, c) => sum + c.amount, 0);
+
     return {
       year,
       month,
@@ -136,6 +161,8 @@ export class AccountingService {
       totalMonthlyExpenses,
       netProfit: Math.round(netProfit),
       margin: Math.round(margin * 100) / 100,
+      totalFiado,
+      totalAbonos,
     };
   }
 

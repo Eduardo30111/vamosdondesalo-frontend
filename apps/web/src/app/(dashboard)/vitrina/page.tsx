@@ -143,8 +143,20 @@ export default function VitrinaPage() {
   const [nequiPayingTotal, setNequiPayingTotal] = useState(false);
   const [processingNequi, setProcessingNequi] = useState(false);
 
+  // Cash payment modal
+  const [showCashModal, setShowCashModal] = useState(false);
+  const [cashOrderId, setCashOrderId] = useState<string | null>(null);
+  const [cashOrderTotal, setCashOrderTotal] = useState(0);
+  const [receivedCashAmount, setReceivedCashAmount] = useState('');
+  const [processingCash, setProcessingCash] = useState(false);
+  const [customers, setCustomers] = useState<any[]>([]);
+  const [customerSearch, setCustomerSearch] = useState('');
+
   useEffect(() => {
-    if (user && user.role !== 'COCINA') fetchOrders();
+    if (user && user.role !== 'COCINA') {
+      fetchOrders();
+      fetchCustomers();
+    }
 
     if (typeof window !== 'undefined') {
       setIsOnline(navigator.onLine);
@@ -238,10 +250,65 @@ export default function VitrinaPage() {
     }
   };
 
+  const fetchCustomers = async () => {
+    try {
+      if (navigator.onLine) {
+        const data = await api.get<any[]>('/customers');
+        setCustomers(data);
+        localStorage.setItem('salo_cached_vitrina_customers', JSON.stringify(data));
+      } else {
+        const cached = localStorage.getItem('salo_cached_vitrina_customers');
+        setCustomers(cached ? JSON.parse(cached) : []);
+      }
+    } catch (e) {
+      console.error('Error fetching customers:', e);
+    }
+  };
+
+  const handleRemoveItem = async (orderId: string, itemId: string) => {
+    if (!navigator.onLine) {
+      toast.error('Debes estar conectado a internet para editar cuentas activas');
+      return;
+    }
+    if (!confirm('¿Eliminar este ítem del pedido? El stock se devolverá.')) return;
+    try {
+      await api.put(`/orders/${orderId}/remove-item/${itemId}`);
+      toast.success('Ítem eliminado y total recalculado');
+      fetchOrders();
+    } catch (e: any) {
+      toast.error(e.message || 'Error al eliminar ítem');
+    }
+  };
+
+  const handleEditItemPrice = async (orderId: string, itemId: string, currentPrice: number) => {
+    if (!navigator.onLine) {
+      toast.error('Debes estar conectado a internet para editar cuentas activas');
+      return;
+    }
+    const newPrice = prompt('Ingresa el nuevo precio para este ítem:', currentPrice.toString());
+    if (newPrice === null || isNaN(Number(newPrice))) return;
+    try {
+      await api.put(`/orders/${orderId}/edit-item/${itemId}`, { unitPrice: Number(newPrice) });
+      toast.success('Precio actualizado');
+      fetchOrders();
+    } catch (e: any) {
+      toast.error(e.message || 'Error al actualizar precio');
+    }
+  };
+
   // ─── Cobrar en efectivo ───────────────────
-  const pagar = async (id: string) => {
-    if (!confirm('¿Cobrar este pedido en efectivo?')) return;
+  const abrirCash = (id: string, total: number) => {
+    setCashOrderId(id);
+    setCashOrderTotal(total);
+    setReceivedCashAmount('');
+    setShowCashModal(true);
+  };
+
+  const confirmarPagar = async () => {
+    if (!cashOrderId) return;
+    setProcessingCash(true);
     
+    const id = cashOrderId;
     if (id && id.startsWith && id.startsWith('local-')) {
       const queue = getOfflineQueue();
       const itemIndex = queue.findIndex((it) => it.id === id);
@@ -253,8 +320,10 @@ export default function VitrinaPage() {
         };
         saveOfflineQueue(queue);
         toast.success('Pago en efectivo registrado localmente. Se sincronizará al recuperar conexión.');
+        setShowCashModal(false);
         fetchOrders();
       }
+      setProcessingCash(false);
       return;
     }
 
@@ -262,11 +331,15 @@ export default function VitrinaPage() {
       const order = orders.find((o) => o.id === id);
       const amount = order ? order.total : 0;
       await api.post('/payments', { orderId: id, method: 'CASH', amount });
+      toast.success('Pago en efectivo registrado');
+      setShowCashModal(false);
+      fetchOrders();
     } catch (e) {
       console.error(e);
       alert('Error al procesar el pago');
+    } finally {
+      setProcessingCash(false);
     }
-    fetchOrders();
   };
 
   // ─── Cancelar pedido ─────────────────────
@@ -558,18 +631,70 @@ export default function VitrinaPage() {
             <button onClick={() => setShowFiarModal(false)} className="absolute top-4 right-4 p-1"><X size={20} /></button>
             <h2 className="text-lg font-bold mb-4">Fiar pedido — {formatCurrency(fiarTotal)}</h2>
             <div className="space-y-3">
-              <input type="text" placeholder="Cedula del cliente" value={cedula} onChange={(e) => setCedula(e.target.value)} onBlur={buscarCedula} className="w-full px-4 py-3 rounded-xl border border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 text-sm" />
-              {foundCustomer ? (
+              <div>
+                <label className="block text-[11px] font-bold text-gray-400 uppercase tracking-wider mb-1">Buscar o seleccionar cliente existente</label>
+                <select
+                  value={foundCustomer ? foundCustomer.id : ''}
+                  onChange={(e) => {
+                    const selectedId = e.target.value;
+                    if (selectedId === '') {
+                      setFoundCustomer(null);
+                      setCedula('');
+                      setNewCustomerName('');
+                    } else {
+                      const cust = customers.find((c) => c.id === selectedId);
+                      if (cust) {
+                        setFoundCustomer(cust);
+                        setCedula(cust.cedula);
+                      }
+                    }
+                  }}
+                  className="w-full px-4 py-3 rounded-xl border border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 text-sm outline-none focus:ring-2 focus:ring-orange-500 transition"
+                >
+                  <option value="">-- Crear cliente nuevo --</option>
+                  {customers.map((c: any) => (
+                    <option key={c.id} value={c.id}>
+                      {c.name} (C.C. {c.cedula})
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {!foundCustomer && (
+                <>
+                  <input
+                    type="text"
+                    placeholder="Cédula del cliente *"
+                    required
+                    value={cedula}
+                    onChange={(e) => setCedula(e.target.value)}
+                    onBlur={buscarCedula}
+                    className="w-full px-4 py-3 rounded-xl border border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 text-sm"
+                  />
+                  <input
+                    type="text"
+                    placeholder="Nombre del cliente (nuevo) *"
+                    required
+                    value={newCustomerName}
+                    onChange={(e) => setNewCustomerName(e.target.value)}
+                    className="w-full px-4 py-3 rounded-xl border border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 text-sm"
+                  />
+                  <input
+                    type="tel"
+                    placeholder="Teléfono (opcional)"
+                    value={newCustomerPhone}
+                    onChange={(e) => setNewCustomerPhone(e.target.value)}
+                    className="w-full px-4 py-3 rounded-xl border border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 text-sm"
+                  />
+                  <p className="text-[10px] text-gray-400">Cliente nuevo — se creará automáticamente</p>
+                </>
+              )}
+
+              {foundCustomer && (
                 <div className="bg-green-50 dark:bg-green-900/20 p-3 rounded-xl text-sm">
                   <p className="font-bold">{foundCustomer.name}</p>
                   <p className="text-gray-500">Deuda actual: {formatCurrency(foundCustomer.totalDebt)}</p>
                 </div>
-              ) : (
-                <>
-                  <input type="text" placeholder="Nombre del cliente (nuevo)" value={newCustomerName} onChange={(e) => setNewCustomerName(e.target.value)} className="w-full px-4 py-3 rounded-xl border border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 text-sm" />
-                  <input type="tel" placeholder="Telefono (opcional)" value={newCustomerPhone} onChange={(e) => setNewCustomerPhone(e.target.value)} className="w-full px-4 py-3 rounded-xl border border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 text-sm" />
-                  <p className="text-xs text-gray-400">Cliente nuevo — se creara automaticamente</p>
-                </>
               )}
               <button onClick={fiar} className="w-full py-3 bg-yellow-500 text-white rounded-xl font-bold hover:opacity-90 text-sm">Confirmar Fiado</button>
             </div>
@@ -693,6 +818,66 @@ export default function VitrinaPage() {
         </div>
       )}
 
+      {/* ═══ Modal Efectivo (Calculadora de Cambio) ═══ */}
+      {showCashModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50">
+          <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-full max-w-sm p-6 relative animate-in fade-in zoom-in duration-200">
+            <button onClick={() => setShowCashModal(false)} className="absolute top-4 right-4 p-1"><X size={20} /></button>
+
+            {/* Header */}
+            <div className="flex items-center gap-3 mb-5">
+              <div className="w-10 h-10 bg-green-100 dark:bg-green-900/30 rounded-xl flex items-center justify-center">
+                <Banknote size={20} className="text-green-600" />
+              </div>
+              <div>
+                <h2 className="text-lg font-bold">Pago en Efectivo</h2>
+                <p className="text-sm text-gray-500">Total: {formatCurrency(cashOrderTotal)}</p>
+              </div>
+            </div>
+
+            {/* Cash amount input */}
+            <div className="mb-4">
+              <label className="text-xs text-gray-500 font-semibold block mb-1">Monto Recibido</label>
+              <div className="relative">
+                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 font-bold">$</span>
+                <input
+                  type="number"
+                  placeholder="¿Con cuánto paga el cliente?"
+                  value={receivedCashAmount}
+                  onChange={(e) => setReceivedCashAmount(e.target.value)}
+                  className="w-full pl-8 pr-4 py-3 rounded-xl border border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 text-lg font-bold focus:ring-2 focus:ring-green-300 outline-none"
+                  autoFocus
+                />
+              </div>
+            </div>
+
+            {/* Change calculation */}
+            {parseFloat(receivedCashAmount) > 0 && (
+              <div className="p-3 bg-green-50 dark:bg-green-950/20 rounded-xl flex justify-between items-center mb-4">
+                <span className="text-sm font-medium text-green-700 dark:text-green-400">Cambio a devolver:</span>
+                <span className="text-lg font-bold text-green-700 dark:text-green-400">
+                  {formatCurrency(Math.max(0, (parseFloat(receivedCashAmount) || 0) - cashOrderTotal))}
+                </span>
+              </div>
+            )}
+
+            {/* Confirm */}
+            <button
+              onClick={confirmarPagar}
+              disabled={processingCash}
+              className="w-full py-3 bg-green-600 text-white rounded-xl font-bold text-sm hover:bg-green-700 transition disabled:opacity-50 flex items-center justify-center gap-2"
+            >
+              {processingCash ? 'Procesando...' : (
+                <>
+                  <DollarSign size={16} />
+                  Confirmar Pago
+                </>
+              )}
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* ═══ Modal Nequi ═══ */}
       {showNequiModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50">
@@ -779,7 +964,7 @@ export default function VitrinaPage() {
             </div>
 
             {/* Confirm */}
-            <button
+<button
               onClick={confirmarNequi}
               disabled={processingNequi || nequiAmountNum <= 0 || nequiAmountNum > nequiOrderTotal}
               className="w-full py-3 bg-purple-600 text-white rounded-xl font-bold text-sm hover:bg-purple-700 transition disabled:opacity-50 flex items-center justify-center gap-2"
@@ -799,87 +984,212 @@ export default function VitrinaPage() {
         </div>
       )}
 
-      {/* ═══ Orders list ═══ */}
-      {loading ? (
-        <div className="text-center py-12">Cargando...</div>
-      ) : orders.length === 0 ? (
-        <div className="text-center py-12 text-gray-400">No hay cuentas activas.</div>
-      ) : (
-        <div className="space-y-3">
-          {orders.map((o) => {
-            const isExpanded = expanded === o.id;
-            return (
-              <div key={o.id} className="bg-white dark:bg-gray-800 rounded-xl border dark:border-gray-700 overflow-hidden">
-                {/* Fila principal */}
-                <div className="p-4 flex flex-col md:flex-row md:items-center gap-3 justify-between">
-                  <div className="flex items-center gap-3 flex-1">
-                    <button onClick={() => setExpanded(isExpanded ? null : o.id)} className="p-1">
-                      {isExpanded ? <ChevronUp size={18} /> : <ChevronDown size={18} />}
-                    </button>
-                    <div>
-                      <p className="font-bold flex items-center gap-1.5">
-                        {o.customerName}
-                        {o.id && o.id.startsWith && o.id.startsWith('local-') && (
-                          <span className="text-[10px] bg-orange-100 text-orange-700 px-1.5 py-0.5 rounded-full font-semibold">Local (Sin sincronizar)</span>
-                        )}
-                      </p>
-                      <p className="text-xs text-gray-500">
-                        {o.type === 'TABLE' ? `Mesa ${o.table?.number || '?'}` : o.type === 'TAKEAWAY' ? 'Para llevar' : 'Domicilio'}
-                        {' · '}
-                        <Clock size={12} className="inline" /> {minutosDesde(o.createdAt)} min
-                      </p>
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <span className="text-lg font-bold text-orange-500">{formatCurrency(o.total)}</span>
-                    {o.status === 'READY' && (
-                      <span className="text-xs px-2 py-1 rounded-full bg-yellow-100 text-yellow-700">Listo</span>
-                    )}
-                    {o.status === 'DELIVERED' && (
-                      <span className="text-xs px-2 py-1 rounded-full bg-blue-100 text-blue-700">Entregado</span>
-                    )}
-                  </div>
-                </div>
+      {(() => {
+        const filteredCustomers = customers.filter((c) => {
+          const q = customerSearch.toLowerCase().trim();
+          if (!q) return true;
+          return c.name.toLowerCase().includes(q) || c.cedula.includes(q);
+        });
 
-                {/* Detalle expandido */}
-                {isExpanded && (
-                  <div className="border-t dark:border-gray-700 px-4 pb-4">
-                    <div className="py-3 space-y-2">
-                      {o.items.map((item) => (
-                        <div key={item.id} className="flex justify-between text-sm">
-                          <span>{item.qty}x {item.product?.name || 'Producto'}</span>
-                          <span className="text-gray-500">{formatCurrency(item.unitPrice * item.qty)}</span>
+        return (
+          <div className="p-4 md:p-8 max-w-7xl mx-auto">
+            <div className="flex items-center justify-between mb-2">
+              <h1 className="text-2xl font-bold flex items-center gap-2">Vitrina — Cuentas Activas</h1>
+              <div className="flex items-center gap-2">
+                <span className={`flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold ${
+                  isOnline 
+                    ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400' 
+                    : 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400'
+                }`}>
+                  <span className={`w-2 h-2 rounded-full ${isOnline ? 'bg-green-500' : 'bg-red-500 animate-pulse'}`} />
+                  {isOnline ? 'En línea' : 'Sin conexión'}
+                </span>
+              </div>
+            </div>
+            <p className="text-sm text-gray-500 mb-6">Pedidos entregados esperando pago o fiado.</p>
+
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+              {/* Cuentas Activas (2/3) */}
+              <div className="lg:col-span-2 space-y-4">
+                <h2 className="text-lg font-extrabold flex items-center gap-2 mb-3">
+                  <Clock className="text-orange-500" size={20} /> Cuentas Activas
+                </h2>
+                {loading ? (
+                  <div className="text-center py-12">Cargando...</div>
+                ) : orders.length === 0 ? (
+                  <div className="text-center py-12 text-gray-400">No hay cuentas activas.</div>
+                ) : (
+                  <div className="space-y-3">
+                    {orders.map((o) => {
+                      const isExpanded = expanded === o.id;
+                      return (
+                        <div key={o.id} className="bg-white dark:bg-gray-800 rounded-xl border dark:border-gray-700 overflow-hidden">
+                          {/* Fila principal */}
+                          <div className="p-4 flex flex-col md:flex-row md:items-center gap-3 justify-between">
+                            <div className="flex items-center gap-3 flex-1">
+                              <button onClick={() => setExpanded(isExpanded ? null : o.id)} className="p-1">
+                                {isExpanded ? <ChevronUp size={18} /> : <ChevronDown size={18} />}
+                              </button>
+                              <div>
+                                <p className="font-bold flex items-center gap-1.5">
+                                  {o.customerName}
+                                  {o.id && o.id.startsWith && o.id.startsWith('local-') && (
+                                    <span className="text-[10px] bg-orange-100 text-orange-700 px-1.5 py-0.5 rounded-full font-semibold">Local (Sin sincronizar)</span>
+                                  )}
+                                </p>
+                                <p className="text-xs text-gray-500">
+                                  {o.type === 'TABLE' ? `Mesa ${o.table?.number || '?'}` : o.type === 'TAKEAWAY' ? 'Para llevar' : 'Domicilio'}
+                                  {' · '}
+                                  <Clock size={12} className="inline" /> {minutosDesde(o.createdAt)} min
+                                </p>
+                              </div>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <span className="text-lg font-bold text-orange-500">{formatCurrency(o.total)}</span>
+                              {o.status === 'READY' && (
+                                <span className="text-xs px-2 py-1 rounded-full bg-yellow-100 text-yellow-700">Listo</span>
+                              )}
+                              {o.status === 'DELIVERED' && (
+                                <span className="text-xs px-2 py-1 rounded-full bg-blue-100 text-blue-700">Entregado</span>
+                              )}
+                            </div>
+                          </div>
+
+                          {/* Detalle expandido */}
+                          {isExpanded && (
+                            <div className="border-t dark:border-gray-700 px-4 pb-4">
+                              <div className="py-3 space-y-2">
+                                {o.items.map((item) => {
+                                  const canModify = o.id && !o.id.startsWith('local-');
+                                  return (
+                                    <div key={item.id} className="flex items-center justify-between text-sm bg-gray-50 dark:bg-gray-750/30 p-2 rounded-xl">
+                                      <div className="flex-1">
+                                        <span className="font-semibold">{item.qty}x</span> {item.product?.name || 'Producto'}
+                                        <span className="block text-[11px] text-gray-500">{formatCurrency(item.unitPrice)} c/u</span>
+                                      </div>
+                                      <div className="flex items-center gap-3">
+                                        <span className="font-bold text-gray-700 dark:text-gray-300">{formatCurrency(item.unitPrice * item.qty)}</span>
+                                        {canModify && (
+                                          <div className="flex gap-1">
+                                            <button
+                                              onClick={() => handleEditItemPrice(o.id, item.id, item.unitPrice)}
+                                              className="p-1.5 text-gray-400 hover:text-blue-500 hover:bg-blue-50 dark:hover:bg-blue-950/20 rounded-lg transition"
+                                              title="Editar precio"
+                                            >
+                                              <Edit3 size={14} />
+                                            </button>
+                                            <button
+                                              onClick={() => handleRemoveItem(o.id, item.id)}
+                                              className="p-1.5 text-gray-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-950/20 rounded-lg transition"
+                                              title="Eliminar ítem"
+                                            >
+                                              <Trash2 size={14} />
+                                            </button>
+                                          </div>
+                                        )}
+                                      </div>
+                                    </div>
+                                  );
+                                })}
+                                <div className="border-t dark:border-gray-600 pt-2 flex justify-between font-bold">
+                                  <span>Total</span>
+                                  <span>{formatCurrency(o.total)}</span>
+                                </div>
+                              </div>
+                              <div className="flex flex-wrap gap-2 pt-2">
+                                <button onClick={() => abrirCash(o.id, o.total)} className="flex-1 min-w-[100px] py-2 bg-green-500 text-white rounded-lg font-bold text-sm hover:opacity-90 flex items-center justify-center gap-1">
+                                  <DollarSign size={16} /> Efectivo
+                                </button>
+                                <button onClick={() => abrirNequi(o.id, o.total)} className="flex-1 min-w-[100px] py-2 bg-purple-600 text-white rounded-lg font-bold text-sm hover:opacity-90 flex items-center justify-center gap-1">
+                                  <Smartphone size={16} /> Nequi
+                                </button>
+                                <button onClick={() => abrirFiar(o.id, o.total)} className="py-2 px-3 bg-yellow-500 text-white rounded-lg font-bold text-sm hover:opacity-90 flex items-center justify-center gap-1">
+                                  <CreditCard size={16} /> Fiado
+                                </button>
+                                <button onClick={() => abrirEditar(o)} className="py-2 px-3 bg-blue-500 text-white rounded-lg font-bold text-sm hover:opacity-90 flex items-center justify-center gap-1">
+                                  <Edit3 size={16} /> Editar
+                                </button>
+                                <button onClick={() => cancelar(o.id)} className="py-2 px-3 bg-red-500 text-white rounded-lg font-bold text-sm hover:opacity-90 flex items-center justify-center gap-1">
+                                  <Trash2 size={16} />
+                                </button>
+                              </div>
+                            </div>
+                          )}
                         </div>
-                      ))}
-                      <div className="border-t dark:border-gray-600 pt-2 flex justify-between font-bold">
-                        <span>Total</span>
-                        <span>{formatCurrency(o.total)}</span>
-                      </div>
-                    </div>
-                    <div className="flex flex-wrap gap-2 pt-2">
-                      <button onClick={() => pagar(o.id)} className="flex-1 min-w-[100px] py-2 bg-green-500 text-white rounded-lg font-bold text-sm hover:opacity-90 flex items-center justify-center gap-1">
-                        <DollarSign size={16} /> Efectivo
-                      </button>
-                      <button onClick={() => abrirNequi(o.id, o.total)} className="flex-1 min-w-[100px] py-2 bg-purple-600 text-white rounded-lg font-bold text-sm hover:opacity-90 flex items-center justify-center gap-1">
-                        <Smartphone size={16} /> Nequi
-                      </button>
-                      <button onClick={() => abrirFiar(o.id, o.total)} className="py-2 px-3 bg-yellow-500 text-white rounded-lg font-bold text-sm hover:opacity-90 flex items-center justify-center gap-1">
-                        <CreditCard size={16} /> Fiado
-                      </button>
-                      <button onClick={() => abrirEditar(o)} className="py-2 px-3 bg-blue-500 text-white rounded-lg font-bold text-sm hover:opacity-90 flex items-center justify-center gap-1">
-                        <Edit3 size={16} /> Editar
-                      </button>
-                      <button onClick={() => cancelar(o.id)} className="py-2 px-3 bg-red-500 text-white rounded-lg font-bold text-sm hover:opacity-90 flex items-center justify-center gap-1">
-                        <Trash2 size={16} />
-                      </button>
-                    </div>
+                      );
+                    })}
                   </div>
                 )}
               </div>
-            );
-          })}
-        </div>
-      )}
+
+              {/* Directorio de Deudores (1/3) */}
+              <div className="space-y-4 bg-white dark:bg-gray-800 rounded-3xl p-5 border border-gray-150/40 dark:border-gray-750/70 shadow-xs h-[fit-content]">
+                <div>
+                  <h2 className="text-lg font-extrabold flex items-center gap-2">
+                    <DollarSign className="text-red-500" size={20} /> Clientes y Deudas
+                  </h2>
+                  <p className="text-xs text-gray-500">Consulta saldos y registra abonos en tiempo real</p>
+                </div>
+
+                <div className="relative">
+                  <Search className="absolute left-3 top-2.5 text-gray-400" size={16} />
+                  <input
+                    type="text"
+                    placeholder="Buscar por nombre o cédula..."
+                    value={customerSearch}
+                    onChange={(e) => setCustomerSearch(e.target.value)}
+                    className="w-full pl-9 pr-4 py-2 rounded-xl border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-750 text-xs outline-none focus:ring-2 focus:ring-orange-500 transition"
+                  />
+                </div>
+
+                <div className="space-y-2 max-h-[400px] overflow-y-auto pr-1">
+                  {filteredCustomers.length === 0 ? (
+                    <p className="text-xs text-gray-400 text-center py-6">No se encontraron clientes.</p>
+                  ) : (
+                    filteredCustomers.map((c: any) => (
+                      <div key={c.id} className="p-3 bg-gray-50 dark:bg-gray-750/30 rounded-2xl flex items-center justify-between border border-gray-100/50 dark:border-gray-700/50">
+                        <div className="min-w-0 flex-1 mr-2">
+                          <p className="font-extrabold text-xs text-gray-800 dark:text-gray-200 truncate">{c.name}</p>
+                          <p className="text-[10px] text-gray-500 truncate">C.C. {c.cedula} {c.phone ? `· Cel. ${c.phone}` : ''}</p>
+                          {c.totalDebt > 0 ? (
+                            <p className="text-xs font-black text-red-500 mt-1">Debe: {formatCurrency(c.totalDebt)}</p>
+                          ) : (
+                            <p className="text-xs text-green-500 mt-1">Sin deudas</p>
+                          )}
+                        </div>
+                        {c.totalDebt > 0 && (
+                          <button
+                            onClick={async () => {
+                              const abono = prompt(`Registrar abono para ${c.name} (Deuda actual: ${formatCurrency(c.totalDebt)}):`);
+                              if (abono === null || isNaN(Number(abono))) return;
+                              const amt = Number(abono);
+                              if (amt <= 0) {
+                                alert('Monto inválido');
+                                return;
+                              }
+                              try {
+                                await api.post(`/customers/${c.id}/payment`, { amount: amt, note: 'Abono desde vitrina' });
+                                toast.success('Abono registrado con éxito');
+                                fetchCustomers();
+                                fetchOrders();
+                              } catch (e: any) {
+                                toast.error(e.message || 'Error al registrar abono');
+                              }
+                            }}
+                            className="px-2.5 py-1.5 bg-orange-500 hover:bg-orange-600 text-white rounded-lg font-bold text-[10px] shadow-sm transition shrink-0"
+                          >
+                            Abonar
+                          </button>
+                        )}
+                      </div>
+                    ))
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
 }

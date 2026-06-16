@@ -125,6 +125,52 @@ export default function ConfiguracionPage() {
             </div>
           </div>
         </div>
+
+        <div className="border-t border-gray-100 dark:border-gray-700 pt-6">
+          <h2 className="font-bold mb-4">Tarifas de Domicilio</h2>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-600 dark:text-gray-400 mb-1">Puerto Colombia ($)</label>
+              <input
+                type="number"
+                placeholder="2500"
+                value={config.delivery_fee_puerto || ''}
+                onChange={(e) => setConfig({ ...config, delivery_fee_puerto: e.target.value })}
+                className="w-full px-4 py-2.5 rounded-xl border border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-700"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-600 dark:text-gray-400 mb-1">Pradomar ($)</label>
+              <input
+                type="number"
+                placeholder="3000"
+                value={config.delivery_fee_pradomar || ''}
+                onChange={(e) => setConfig({ ...config, delivery_fee_pradomar: e.target.value })}
+                className="w-full px-4 py-2.5 rounded-xl border border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-700"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-600 dark:text-gray-400 mb-1">Salgar ($)</label>
+              <input
+                type="number"
+                placeholder="5000"
+                value={config.delivery_fee_salgar || ''}
+                onChange={(e) => setConfig({ ...config, delivery_fee_salgar: e.target.value })}
+                className="w-full px-4 py-2.5 rounded-xl border border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-700"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-600 dark:text-gray-400 mb-1">Barranquilla ($)</label>
+              <input
+                type="number"
+                placeholder="8000"
+                value={config.delivery_fee_barranquilla || ''}
+                onChange={(e) => setConfig({ ...config, delivery_fee_barranquilla: e.target.value })}
+                className="w-full px-4 py-2.5 rounded-xl border border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-700"
+              />
+            </div>
+          </div>
+        </div>
       </div>
     </div>
   );

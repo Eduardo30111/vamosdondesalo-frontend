@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 
 interface CartItem {
+  cartItemId: string;
   productId: string;
   name: string;
   price: number;
@@ -15,10 +16,11 @@ interface CartState {
   tableId: string | null;
   customerName: string;
   notes: string;
-  addItem: (item: Omit<CartItem, 'qty' | 'notes'>) => void;
-  removeItem: (productId: string) => void;
-  updateQty: (productId: string, qty: number) => void;
-  updateItemNotes: (productId: string, notes: string) => void;
+  addItem: (item: Omit<CartItem, 'cartItemId' | 'qty' | 'notes'>) => void;
+  removeItem: (cartItemId: string) => void;
+  updateQty: (cartItemId: string, qty: number) => void;
+  updateItemNotes: (cartItemId: string, notes: string) => void;
+  updateItemPrice: (cartItemId: string, price: number) => void;
   setOrderType: (type: 'TABLE' | 'TAKEAWAY' | 'DELIVERY') => void;
   setTableId: (id: string | null) => void;
   setCustomerName: (name: string) => void;
@@ -35,23 +37,27 @@ export const useCartStore = create<CartState>((set, get) => ({
   notes: '',
   addItem: (item) => {
     const items = get().items;
-    const existing = items.find((i) => i.productId === item.productId);
+    const existing = items.find((i) => i.productId === item.productId && i.name === item.name && i.price === item.price);
     if (existing) {
-      set({ items: items.map((i) => i.productId === item.productId ? { ...i, qty: i.qty + 1 } : i) });
+      set({ items: items.map((i) => i.cartItemId === existing.cartItemId ? { ...i, qty: i.qty + 1 } : i) });
     } else {
-      set({ items: [...items, { ...item, qty: 1, notes: '' }] });
+      const cartItemId = `${item.productId}-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+      set({ items: [...items, { ...item, cartItemId, qty: 1, notes: '' }] });
     }
   },
-  removeItem: (productId) => set({ items: get().items.filter((i) => i.productId !== productId) }),
-  updateQty: (productId, qty) => {
+  removeItem: (cartItemId) => set({ items: get().items.filter((i) => i.cartItemId !== cartItemId) }),
+  updateQty: (cartItemId, qty) => {
     if (qty <= 0) {
-      set({ items: get().items.filter((i) => i.productId !== productId) });
+      set({ items: get().items.filter((i) => i.cartItemId !== cartItemId) });
     } else {
-      set({ items: get().items.map((i) => i.productId === productId ? { ...i, qty } : i) });
+      set({ items: get().items.map((i) => i.cartItemId === cartItemId ? { ...i, qty } : i) });
     }
   },
-  updateItemNotes: (productId, notes) => {
-    set({ items: get().items.map((i) => i.productId === productId ? { ...i, notes } : i) });
+  updateItemNotes: (cartItemId, notes) => {
+    set({ items: get().items.map((i) => i.cartItemId === cartItemId ? { ...i, notes } : i) });
+  },
+  updateItemPrice: (cartItemId, price) => {
+    set({ items: get().items.map((i) => i.cartItemId === cartItemId ? { ...i, price } : i) });
   },
   setOrderType: (type) => set({ orderType: type }),
   setTableId: (id) => set({ tableId: id }),

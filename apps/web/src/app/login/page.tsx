@@ -50,6 +50,10 @@ export default function LoginPage() {
         case 'COCINA':
           router.push('/cocina');
           break;
+        case 'MERCHANT':
+        case 'MERCHANT_STAFF':
+          router.push('/merchant');
+          break;
       }
     } catch (err: unknown) {
       toast.error(err instanceof Error ? err.message : 'Error al iniciar sesión');

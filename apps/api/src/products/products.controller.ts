@@ -12,9 +12,9 @@ export class ProductsController {
   constructor(private productsService: ProductsService) {}
 
   @Get()
-  @Roles('ADMIN', 'VENDEDOR')
-  findAll() {
-    return this.productsService.findAll();
+  @Roles('ADMIN', 'VENDEDOR', 'COCINA', 'MERCHANT', 'MERCHANT_STAFF')
+  findAll(@Request() req: any) {
+    return this.productsService.findAllForUser(req.user.id);
   }
 
   @Get(':id')
@@ -27,7 +27,7 @@ export class ProductsController {
   @Roles('ADMIN', 'MERCHANT')
   create(@Request() req: any, @Body() dto: CreateProductDto) {
     const storeId = req.user.role === 'ADMIN' ? (dto as any).storeId : req.user.storeId;
-    return this.productsService.create(dto, storeId);
+    return this.productsService.create(dto, storeId, req.user.id);
   }
 
   @Put(':id')

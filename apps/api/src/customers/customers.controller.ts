@@ -91,4 +91,10 @@ export class CustomersController {
     }
     return this.service.updateCredit(creditId, body.amount, body.note, date);
   }
+
+  @Put(':id')
+  @Roles('ADMIN', 'VENDEDOR')
+  update(@Param('id') id: string, @Body() body: { name: string; cedula: string; phone?: string }) {
+    return this.service.update(id, body);
+  }
 }

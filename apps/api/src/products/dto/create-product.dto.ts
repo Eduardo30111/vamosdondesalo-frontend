@@ -35,4 +35,12 @@ export class CreateProductDto {
   @Min(0)
   @IsOptional()
   dailyStock?: number;
+
+  @IsString()
+  @IsOptional()
+  saleType?: string;
+
+  @IsString()
+  @IsOptional()
+  prices?: string;
 }

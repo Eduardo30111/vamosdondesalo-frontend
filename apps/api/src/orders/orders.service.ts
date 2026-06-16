@@ -1,4 +1,4 @@
-import { Injectable, BadRequestException } from '@nestjs/common';
+import { Injectable, BadRequestException, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { RealtimeGateway } from '../realtime/realtime.gateway';
 import { CreateOrderDto } from './dto/create-order.dto';
@@ -115,11 +115,28 @@ export class OrdersService {
   async create(dto: CreateOrderDto) {
     const products = await this.prisma.product.findMany({
       where: { id: { in: dto.items.map((i) => i.productId) } },
-      include: { vitrinaStock: true },
+      include: { vitrinaStock: true, store: true },
     });
 
     const productMap = new Map(products.map((p) => [p.id, p]));
     let total = 0;
+
+    // Validate vitrina stock before proceeding
+    for (const item of dto.items) {
+      const product = productMap.get(item.productId);
+      if (product && product.preparationMode === 'VITRINA') {
+        const isFreeStore = product.store?.plan === 'FREE';
+        if (isFreeStore) {
+          // Bypass stock validation for FREE stores
+          continue;
+        }
+
+        const stock = product.vitrinaStock?.qty ?? 0;
+        if (item.qty > stock) {
+          throw new BadRequestException(`Stock insuficiente para "${product.name}" (Disponible: ${stock}, Solicitado: ${item.qty})`);
+        }
+      }
+    }
 
     const items = dto.items.map((item) => {
       const product = productMap.get(item.productId);
@@ -140,9 +157,26 @@ export class OrdersService {
     if (dto.type === 'DELIVERY' && dto.deliveryZoneId) {
       const zone = await this.prisma.deliveryZone.findUnique({ where: { id: dto.deliveryZoneId } });
       if (zone) {
-        deliveryFee = zone.fee;
-        const subtotal = total; // total is the items subtotal here
+        let baseFee = zone.fee;
         const zoneNameClean = zone.name.toLowerCase().trim();
+
+        if (dto.storeId) {
+          const store = await this.prisma.store.findUnique({ where: { id: dto.storeId } });
+          if (store && store.name !== 'Donde Salo!') {
+            if (zoneNameClean.includes('puerto')) {
+              baseFee = store.deliveryFeePuerto;
+            } else if (zoneNameClean.includes('pradomar')) {
+              baseFee = store.deliveryFeePradomar;
+            } else if (zoneNameClean.includes('salgar')) {
+              baseFee = store.deliveryFeeSalgar;
+            } else if (zoneNameClean.includes('barranquilla')) {
+              baseFee = store.deliveryFeeBarranquilla;
+            }
+          }
+        }
+
+        deliveryFee = baseFee;
+        const subtotal = total; // total is the items subtotal here
         if (zoneNameClean.includes('puerto colombia') || zoneNameClean.includes('puerto col') || zoneNameClean.includes('pradomar')) {
           if (subtotal > 10000) {
             deliveryFee = 0;
@@ -178,11 +212,14 @@ export class OrdersService {
       if (dto.storeId) {
         const store = await tx.store.findUnique({ where: { id: dto.storeId } });
         if (store) {
-          const commission = itemsSubtotal * store.commissionRate;
-          await tx.store.update({
-            where: { id: dto.storeId },
-            data: { balance: { decrement: commission } },
-          });
+          const isTrial = (Date.now() - store.createdAt.getTime()) < 30 * 24 * 60 * 60 * 1000;
+          const commission = isTrial ? 0 : itemsSubtotal * store.commissionRate;
+          if (commission > 0) {
+            await tx.store.update({
+              where: { id: dto.storeId },
+              data: { balance: { decrement: commission } },
+            });
+          }
         }
       }
 
@@ -193,6 +230,7 @@ export class OrdersService {
           customerName: dto.customerName,
           customerPhone: dto.customerPhone,
           customerAddress: dto.customerAddress,
+          customerDoc: dto.customerDoc,
           deliveryZoneId: dto.deliveryZoneId,
           deliveryFee,
           notes: dto.notes,
@@ -216,6 +254,12 @@ export class OrdersService {
       for (const item of items) {
         const product = productMap.get(item.productId);
         if (product && product.preparationMode === 'VITRINA') {
+          const isFreeStore = product.store?.plan === 'FREE';
+          if (isFreeStore) {
+            // Bypass stock decrement for FREE stores
+            continue;
+          }
+
           await this.prisma.vitrinaStock.updateMany({
             where: { productId: item.productId },
             data: { qty: { decrement: item.qty } },
@@ -241,6 +285,17 @@ export class OrdersService {
     });
 
     const productMap = new Map(products.map((p) => [p.id, p]));
+
+    // Validate vitrina stock before proceeding
+    for (const item of items) {
+      const product = productMap.get(item.productId);
+      if (product && product.preparationMode === 'VITRINA') {
+        const stock = product.vitrinaStock?.qty ?? 0;
+        if (item.qty > stock) {
+          throw new BadRequestException(`Stock insuficiente para "${product.name}" (Disponible: ${stock}, Solicitado: ${item.qty})`);
+        }
+      }
+    }
 
     const newItems = items.map((item) => {
       const product = productMap.get(item.productId);
@@ -306,6 +361,11 @@ export class OrdersService {
   }
 
   async fiar(id: string, customerId: string) {
+    const order = await this.prisma.order.findUnique({ where: { id } });
+    if (order && (order.paymentStatus === 'PAID' || order.paymentStatus === 'FIADO')) {
+      throw new BadRequestException('El pedido ya se encuentra cobrado o fiado');
+    }
+
     const updated = await this.prisma.order.update({
       where: { id },
       data: { paymentStatus: 'FIADO', isFiated: true, updatedAt: new Date() },
@@ -473,5 +533,136 @@ export class OrdersService {
     const store = await this.prisma.store.findUnique({ where: { ownerId } });
     if (!store) throw new BadRequestException('El usuario no posee una tienda');
     return this.findStoreDeliveries(store.id);
+  }
+
+  async removeItem(orderId: string, itemId: string) {
+    const item = await this.prisma.orderItem.findUnique({
+      where: { id: itemId },
+      include: { product: { include: { store: true } } },
+    });
+    if (!item || item.orderId !== orderId) {
+      throw new NotFoundException('Producto del pedido no encontrado');
+    }
+
+    const order = await this.prisma.order.findUniqueOrThrow({
+      where: { id: orderId },
+      include: { items: true },
+    });
+
+    const isFreeStore = item.product?.store?.plan === 'FREE';
+
+    // Restore stock if it's VITRINA and not FREE plan
+    if (item.product?.preparationMode === 'VITRINA' && !isFreeStore) {
+      await this.prisma.vitrinaStock.updateMany({
+        where: { productId: item.productId },
+        data: { qty: { increment: item.qty } },
+      });
+    }
+
+    // Delete item
+    await this.prisma.orderItem.delete({ where: { id: itemId } });
+
+    // Check remaining items
+    const remainingItems = order.items.filter((i) => i.id !== itemId);
+    if (remainingItems.length === 0) {
+      // Delete empty order to keep vitrina clean
+      await this.prisma.order.delete({ where: { id: orderId } });
+      this.realtime.server.emit('vitrina:updated', { orderId });
+      return { success: true, deletedOrder: true };
+    }
+
+    // Recalculate total
+    const newItemsTotal = remainingItems.reduce((sum, i) => sum + i.unitPrice * i.qty, 0);
+    const newTotal = newItemsTotal + (order.deliveryFee ?? 0);
+
+    const updated = await this.prisma.order.update({
+      where: { id: orderId },
+      data: { total: newTotal, updatedAt: new Date() },
+      include: {
+        items: { include: { product: true } },
+        table: true,
+        deliveryZone: true,
+        payments: true,
+      },
+    });
+
+    this.realtime.server.emit('vitrina:updated', { orderId });
+    return mapOrderLegacyStatus(updated);
+  }
+
+  async editItem(orderId: string, itemId: string, qty?: number, unitPrice?: number) {
+    const item = await this.prisma.orderItem.findUnique({
+      where: { id: itemId },
+      include: { product: { include: { store: true } } },
+    });
+    if (!item || item.orderId !== orderId) {
+      throw new NotFoundException('Producto del pedido no encontrado');
+    }
+
+    const order = await this.prisma.order.findUniqueOrThrow({
+      where: { id: orderId },
+      include: { items: true },
+    });
+
+    const isFreeStore = item.product?.store?.plan === 'FREE';
+
+    const updateData: Record<string, any> = {};
+
+    if (unitPrice !== undefined) {
+      updateData.unitPrice = unitPrice;
+    }
+
+    if (qty !== undefined && qty !== item.qty) {
+      if (qty <= 0) {
+        return this.removeItem(orderId, itemId);
+      }
+
+      if (item.product?.preparationMode === 'VITRINA' && !isFreeStore) {
+        // Adjust stock by difference
+        const diff = qty - item.qty;
+        if (diff > 0) {
+          const stock = await this.prisma.vitrinaStock.findUnique({ where: { productId: item.productId } });
+          const currentStock = stock?.qty ?? 0;
+          if (diff > currentStock) {
+            throw new BadRequestException(`Stock insuficiente (Disponible: ${currentStock}, Adicional solicitado: ${diff})`);
+          }
+          await this.prisma.vitrinaStock.updateMany({
+            where: { productId: item.productId },
+            data: { qty: { decrement: diff } },
+          });
+        } else {
+          await this.prisma.vitrinaStock.updateMany({
+            where: { productId: item.productId },
+            data: { qty: { increment: Math.abs(diff) } },
+          });
+        }
+      }
+
+      updateData.qty = qty;
+    }
+
+    await this.prisma.orderItem.update({
+      where: { id: itemId },
+      data: updateData,
+    });
+
+    // Recalculate total
+    const allItems = await this.prisma.orderItem.findMany({ where: { orderId } });
+    const newItemsTotal = allItems.reduce((sum, i) => sum + i.unitPrice * i.qty, 0);
+    const newTotal = newItemsTotal + (order.deliveryFee ?? 0);
+
+    const updated = await this.prisma.order.update({
+      where: { id: orderId },
+      data: { total: newTotal, updatedAt: new Date() },
+      include: {
+        items: { include: { product: true } },
+        table: true,
+        deliveryZone: true,
+        payments: true,
+      },
+    });
+
+    this.realtime.server.emit('vitrina:updated', { orderId });
+    return mapOrderLegacyStatus(updated);
   }
 }

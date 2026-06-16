@@ -1,5 +1,6 @@
 import { Injectable, NotFoundException, BadRequestException, OnModuleInit } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import * as bcrypt from 'bcrypt';
 
 @Injectable()
 export class StoresService implements OnModuleInit {
@@ -7,13 +8,60 @@ export class StoresService implements OnModuleInit {
 
   async onModuleInit() {
     try {
-      await this.prisma.store.updateMany({
-        where: { name: 'Donde Salo!' },
-        data: { commissionRate: 0.0 },
+      // 1. Verify/create default admin user
+      let admin = await this.prisma.user.findUnique({
+        where: { email: 'admin@salo.co' }
       });
-      console.log('✅ Default store Donde Salo! commission rate set to 0%');
+      
+      if (!admin) {
+        const passwordHash = await bcrypt.hash('admin123', 10);
+        admin = await this.prisma.user.create({
+          data: {
+            name: 'Admin Salo',
+            email: 'admin@salo.co',
+            passwordHash,
+            role: 'ADMIN'
+          }
+        });
+        console.log('👤 Created default admin user (admin@salo.co)');
+      }
+
+      // 2. Verify/create default store Donde Salo!
+      let store = await this.prisma.store.findFirst({
+        where: { name: 'Donde Salo!' }
+      });
+
+      if (!store) {
+        store = await this.prisma.store.create({
+          data: {
+            name: 'Donde Salo!',
+            description: 'El templo de los fritos y la comida rápida',
+            whatsappNumber: '573001234567',
+            category: 'RESTAURANT',
+            plan: 'PRO',
+            planExpiresAt: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000), // 1 año
+            commissionRate: 0.0,
+            balance: 100000.0,
+            ownerId: admin.id,
+          }
+        });
+        console.log('🏪 Created default store Donde Salo!');
+
+        // Update admin user to link to this store
+        await this.prisma.user.update({
+          where: { id: admin.id },
+          data: { storeId: store.id }
+        });
+      } else {
+        // Just make sure Donde Salo! has 0.0 commission rate
+        await this.prisma.store.update({
+          where: { id: store.id },
+          data: { commissionRate: 0.0 }
+        });
+        console.log('✅ Default store Donde Salo! commission rate set to 0%');
+      }
     } catch (e) {
-      // ignore
+      console.error('Error during auto-initialization of store/admin:', e);
     }
   }
 
@@ -87,7 +135,7 @@ export class StoresService implements OnModuleInit {
     return store;
   }
 
-  async update(id: string, ownerId: string, isAdmin: boolean, data: { name?: string; description?: string; logoUrl?: string; bannerUrl?: string; whatsappNumber?: string; category?: string }) {
+  async update(id: string, ownerId: string, isAdmin: boolean, data: { name?: string; description?: string; logoUrl?: string; bannerUrl?: string; whatsappNumber?: string; category?: string; customTheme?: string; customDomain?: string; promoMedia?: string; deliveryFeePuerto?: number; deliveryFeePradomar?: number; deliveryFeeSalgar?: number; deliveryFeeBarranquilla?: number }) {
     const store = await this.findOne(id);
     if (!isAdmin && store.ownerId !== ownerId) {
       throw new BadRequestException('No tienes permiso para modificar esta tienda');
