@@ -43,6 +43,10 @@ interface AppConfig {
   business_logo_url: string;
   business_color: string;
   whatsapp_number: string;
+  delivery_fee_puerto?: string;
+  delivery_fee_pradomar?: string;
+  delivery_fee_salgar?: string;
+  delivery_fee_barranquilla?: string;
 }
 
 interface Store {
@@ -54,6 +58,14 @@ interface Store {
   whatsappNumber: string;
   category: string;
   active: boolean;
+  plan?: 'FREE' | 'PRO';
+  customTheme?: string | null;
+  customDomain?: string | null;
+  promoMedia?: string | null;
+  deliveryFeePuerto?: number;
+  deliveryFeePradomar?: number;
+  deliveryFeeSalgar?: number;
+  deliveryFeeBarranquilla?: number;
 }
 
 interface CartItem {
@@ -79,14 +91,62 @@ export default function LandingPage() {
     phone: '',
     address: '',
     zone: '',
+    doc: '',
+    nacional: false,
   });
   const [deliveryZones, setDeliveryZones] = useState<Array<{ id: string; name: string; fee: number }>>([]);
   const [user, setUser] = useState<AuthUser | null>(null);
   const [selectedStore, setSelectedStore] = useState<Store | null>(null);
+  const [currentPromoIndex, setCurrentPromoIndex] = useState(0);
   const [selectedCategory, setSelectedCategory] = useState<string>('TODOS');
   const [searchStoreQuery, setSearchStoreQuery] = useState('');
   const [searchProductQuery, setSearchProductQuery] = useState('');
   const [checkoutSuccessOrders, setCheckoutSuccessOrders] = useState<Array<{ trackingCode: string; storeName: string; whatsappUrl: string }>>([]);
+  const [checkoutLoading, setCheckoutLoading] = useState(false);
+
+  // States for 3D Photo Tilt Effect
+  const [tiltCoords, setTiltCoords] = useState({ x: 0, y: 0 });
+  const [hoveredPhotoIdx, setHoveredPhotoIdx] = useState<number | null>(null);
+
+  const handlePhotoMouseMove = (e: React.MouseEvent<HTMLDivElement>, idx: number) => {
+    const rect = e.currentTarget.getBoundingClientRect();
+    const x = (e.clientX - rect.left - rect.width / 2) / (rect.width / 2);
+    const y = (e.clientY - rect.top - rect.height / 2) / (rect.height / 2);
+    setTiltCoords({ x, y });
+    setHoveredPhotoIdx(idx);
+  };
+
+  const handlePhotoMouseLeave = () => {
+    setTiltCoords({ x: 0, y: 0 });
+    setHoveredPhotoIdx(null);
+  };
+
+  useEffect(() => {
+    setCurrentPromoIndex(0);
+  }, [selectedStore]);
+
+  let promoMediaItems: Array<{ url: string; type: 'IMAGE' | 'VIDEO'; publicId: string }> = [];
+  if (selectedStore?.promoMedia) {
+    try {
+      promoMediaItems = JSON.parse(selectedStore.promoMedia);
+    } catch (e) {
+      console.error('Error parsing promoMedia:', e);
+    }
+  }
+
+  const promoMediaSerialized = selectedStore?.promoMedia || '';
+  useEffect(() => {
+    if (selectedStore?.plan !== 'PRO' || promoMediaItems.length <= 1) return;
+    
+    const currentItem = promoMediaItems[currentPromoIndex];
+    if (currentItem?.type === 'VIDEO') return;
+
+    const interval = setInterval(() => {
+      setCurrentPromoIndex((prev) => (prev + 1) % promoMediaItems.length);
+    }, 5000);
+
+    return () => clearInterval(interval);
+  }, [selectedStore, currentPromoIndex, promoMediaSerialized, promoMediaItems.length]);
 
   const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000';
 
@@ -94,26 +154,62 @@ export default function LandingPage() {
     // Load config
     fetch(`${API_URL}/public/config`)
       .then((r) => r.json())
-      .then(setConfig)
+      .then((data) => {
+        if (data && typeof data === 'object' && !Array.isArray(data)) {
+          setConfig(data);
+        } else {
+          console.error('Expected config object, got:', data);
+        }
+      })
       .catch((e) => console.error('Error fetching config:', e));
 
     // Load products
     fetch(`${API_URL}/public/products`)
       .then((r) => r.json())
-      .then(setProducts)
-      .catch((e) => console.error('Error fetching products:', e));
+      .then((data) => {
+        if (Array.isArray(data)) {
+          setProducts(data);
+        } else {
+          console.error('Expected array of products, got:', data);
+          setProducts([]);
+        }
+      })
+      .catch((e) => {
+        console.error('Error fetching products:', e);
+        setProducts([]);
+      });
 
     // Load stores
     fetch(`${API_URL}/stores`)
       .then((r) => r.json())
-      .then(setStores)
-      .catch((e) => console.error('Error fetching stores:', e));
+      .then((data) => {
+        if (Array.isArray(data)) {
+          setStores(data);
+        } else {
+          console.error('Expected array of stores, got:', data);
+          setStores([]);
+        }
+      })
+      .catch((e) => {
+        console.error('Error fetching stores:', e);
+        setStores([]);
+      });
 
     // Load delivery zones
     fetch(`${API_URL}/public/delivery-zones`)
       .then((r) => r.json())
-      .then(setDeliveryZones)
-      .catch((e) => console.error('Error fetching delivery zones:', e));
+      .then((data) => {
+        if (Array.isArray(data)) {
+          setDeliveryZones(data);
+        } else {
+          console.error('Expected array of delivery zones, got:', data);
+          setDeliveryZones([]);
+        }
+      })
+      .catch((e) => {
+        console.error('Error fetching delivery zones:', e);
+        setDeliveryZones([]);
+      });
     
     // Check if user is logged in
     const token = localStorage.getItem('token');
@@ -192,12 +288,44 @@ export default function LandingPage() {
     }, {});
   }, [cart, config]);
 
-  const getStoreDeliveryFee = useCallback((storeSubtotal: number) => {
+  const getStoreDeliveryFee = useCallback((storeSubtotal: number, store?: any) => {
+    if (customerData.nacional) return 0;
     if (!customerData.zone) return 0;
-    const zone = deliveryZones.find((z) => z.id === customerData.zone);
+    const deliveryZonesArray = Array.isArray(deliveryZones) ? deliveryZones : [];
+    const zone = deliveryZonesArray.find((z) => z.id === customerData.zone);
     if (!zone) return 0;
     
     const zoneNameClean = zone.name.toLowerCase().trim();
+
+    // Determine the fee based on zone for the specific store
+    let baseFee = zone.fee;
+    const isLegacyOrSalo = !store || store.id === 'legacy-salo' || store.name === 'Donde Salo!';
+
+    if (isLegacyOrSalo) {
+      // Use global config fees for the official store
+      if (zoneNameClean.includes('puerto')) {
+        baseFee = parseFloat(config?.delivery_fee_puerto || '') || zone.fee;
+      } else if (zoneNameClean.includes('pradomar')) {
+        baseFee = parseFloat(config?.delivery_fee_pradomar || '') || zone.fee;
+      } else if (zoneNameClean.includes('salgar')) {
+        baseFee = parseFloat(config?.delivery_fee_salgar || '') || zone.fee;
+      } else if (zoneNameClean.includes('barranquilla')) {
+        baseFee = parseFloat(config?.delivery_fee_barranquilla || '') || zone.fee;
+      }
+    } else {
+      // Use store-specific delivery fees for independent stores
+      if (zoneNameClean.includes('puerto')) {
+        baseFee = store.deliveryFeePuerto ?? zone.fee;
+      } else if (zoneNameClean.includes('pradomar')) {
+        baseFee = store.deliveryFeePradomar ?? zone.fee;
+      } else if (zoneNameClean.includes('salgar')) {
+        baseFee = store.deliveryFeeSalgar ?? zone.fee;
+      } else if (zoneNameClean.includes('barranquilla')) {
+        baseFee = store.deliveryFeeBarranquilla ?? zone.fee;
+      }
+    }
+    
+    // Free delivery thresholds
     if (zoneNameClean.includes('puerto colombia') || zoneNameClean.includes('puerto col') || zoneNameClean.includes('pradomar')) {
       if (storeSubtotal > 10000) {
         return 0;
@@ -207,15 +335,15 @@ export default function LandingPage() {
         return 0;
       }
     }
-    return zone.fee;
-  }, [customerData.zone, deliveryZones]);
+    return baseFee;
+  }, [customerData.zone, customerData.nacional, deliveryZones, config]);
 
   // Totals calculations
   const groupedCart = getGroupedCart();
   const storeTotals = Object.keys(groupedCart).map((storeId) => {
     const group = groupedCart[storeId];
     const subtotal = group.items.reduce((sum, item) => sum + item.product.salePrice * item.qty, 0);
-    const deliveryFee = getStoreDeliveryFee(subtotal);
+    const deliveryFee = getStoreDeliveryFee(subtotal, group.store);
     return {
       storeId,
       storeName: group.store.name,
@@ -231,7 +359,8 @@ export default function LandingPage() {
   const cartCount = cart.reduce((sum, item) => sum + item.qty, 0);
 
   const handleCheckout = async () => {
-    if (!customerData.name || !customerData.phone || !customerData.address || !customerData.zone) {
+    if (checkoutLoading) return;
+    if (!customerData.name || !customerData.phone || !customerData.address || (!customerData.nacional && !customerData.zone)) {
       alert('Por favor completa todos los datos');
       return;
     }
@@ -250,99 +379,111 @@ export default function LandingPage() {
       }
     }
 
-    const createdOrders: Array<{ trackingCode: string; storeName: string; whatsappUrl: string }> = [];
-    const keys = Object.keys(groupedCart);
-    
-    setCheckoutSuccessOrders([]);
-
-    for (const storeId of keys) {
-      const group = groupedCart[storeId];
-      const storeSubtotal = group.items.reduce((sum, item) => sum + item.product.salePrice * item.qty, 0);
-      const storeDeliveryFee = getStoreDeliveryFee(storeSubtotal);
+    setCheckoutLoading(true);
+    try {
+      const createdOrders: Array<{ trackingCode: string; storeName: string; whatsappUrl: string }> = [];
+      const keys = Object.keys(groupedCart);
       
-      const payload = {
-        type: 'DELIVERY',
-        customerName: customerData.name,
-        customerPhone: customerData.phone,
-        customerAddress: customerData.address,
-        deliveryZoneId: customerData.zone,
-        deliveryFee: storeDeliveryFee,
-        items: group.items.map((item) => ({
-          productId: item.product.id,
-          qty: item.qty,
-          unitPrice: item.product.salePrice,
-        })),
-        total: storeSubtotal + storeDeliveryFee,
-        storeId: storeId === 'legacy-salo' ? undefined : storeId,
-      };
+      setCheckoutSuccessOrders([]);
 
-      try {
-        const res = await fetch(`${API_URL}/public/orders`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload),
-        });
-        if (!res.ok) throw new Error(`Error en tienda ${group.store.name}`);
-        const order = await res.json();
+      for (const storeId of keys) {
+        const group = groupedCart[storeId];
+        const storeSubtotal = group.items.reduce((sum, item) => sum + item.product.salePrice * item.qty, 0);
+        const storeDeliveryFee = getStoreDeliveryFee(storeSubtotal, group.store);
         
-        // Construct WhatsApp URL
-        const message = encodeURIComponent(
-          `*Vamos Donde Salo - Pedido Confirmado*\n\n` +
-          `*Código:* ${order.trackingCode || 'N/A'}\n` +
-          `*Tienda:* ${group.store.name}\n` +
-          `*Cliente:* ${customerData.name}\n` +
-          `*Teléfono:* ${customerData.phone}\n` +
-          `*Dirección:* ${customerData.address}\n\n` +
-          `*Productos:*\n` +
-          group.items.map((it) => `- ${it.qty}x ${it.product.name} ($${it.product.salePrice.toLocaleString('es-CO')})`).join('\n') + `\n\n` +
-          `*Subtotal:* $${storeSubtotal.toLocaleString('es-CO')}\n` +
-          `*Domicilio:* $${storeDeliveryFee.toLocaleString('es-CO')}\n` +
-          `*Total:* $${(storeSubtotal + storeDeliveryFee).toLocaleString('es-CO')}\n\n` +
-          `Por favor, confirma mi pedido. ¡Muchas gracias!`
-        );
-        const rawPhone = group.store.whatsappNumber.replace('+', '').replace(/\s+/g, '').trim();
-        const whatsappUrl = `https://wa.me/${rawPhone}?text=${message}`;
+        const payload = {
+          type: 'DELIVERY',
+          customerName: customerData.name,
+          customerPhone: customerData.phone,
+          customerAddress: customerData.address + (customerData.nacional ? ' (ENVÍO NACIONAL - Cuadrar por WhatsApp)' : ''),
+          customerDoc: customerData.doc || undefined,
+          deliveryZoneId: customerData.nacional ? undefined : customerData.zone,
+          deliveryFee: storeDeliveryFee,
+          items: group.items.map((item) => ({
+            productId: item.product.id,
+            qty: item.qty,
+            unitPrice: item.product.salePrice,
+          })),
+          total: storeSubtotal + storeDeliveryFee,
+          storeId: storeId === 'legacy-salo' ? undefined : storeId,
+        };
 
-        createdOrders.push({
-          trackingCode: order.trackingCode || 'SALO-XXXXX',
-          storeName: group.store.name,
-          whatsappUrl,
-        });
-      } catch (err) {
-        console.error(err);
-        alert(`Hubo un problema registrando el pedido en la tienda ${group.store.name}. Intente de nuevo.`);
-        return;
+        try {
+          const res = await fetch(`${API_URL}/public/orders`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload),
+          });
+          if (!res.ok) throw new Error(`Error en tienda ${group.store.name}`);
+          const order = await res.json();
+          
+          // Construct WhatsApp URL
+          const message = encodeURIComponent(
+            `*Vamos Donde Salo - Pedido Confirmado*\n\n` +
+            `*Código:* ${order.trackingCode || 'N/A'}\n` +
+            `*Tienda:* ${group.store.name}\n` +
+            `*Cliente:* ${customerData.name}\n` +
+            `*Teléfono:* ${customerData.phone}\n` +
+            `*Dirección:* ${customerData.address}${customerData.nacional ? ' (Envío Nacional)' : ''}\n\n` +
+            `*Productos:*\n` +
+            group.items.map((it) => `- ${it.qty}x ${it.product.name} ($${it.product.salePrice.toLocaleString('es-CO')})`).join('\n') + `\n\n` +
+            `*Subtotal:* $${storeSubtotal.toLocaleString('es-CO')}\n` +
+            `*Domicilio:* ${customerData.nacional ? 'Envío Nacional (A convenir por WhatsApp)' : `$${storeDeliveryFee.toLocaleString('es-CO')}`}\n` +
+            `*Total:* $${(storeSubtotal + storeDeliveryFee).toLocaleString('es-CO')}\n\n` +
+            `Por favor, confirma mi pedido. ¡Muchas gracias!`
+          );
+          const rawPhone = group.store.whatsappNumber.replace('+', '').replace(/\s+/g, '').trim();
+          const whatsappUrl = `https://wa.me/${rawPhone}?text=${message}`;
+
+          createdOrders.push({
+            trackingCode: order.trackingCode || 'SALO-XXXXX',
+            storeName: group.store.name,
+            whatsappUrl,
+          });
+        } catch (err) {
+          console.error(err);
+          alert(`Hubo un problema registrando el pedido en la tienda ${group.store.name}. Intente de nuevo.`);
+          return;
+        }
       }
-    }
 
-    if (createdOrders.length > 0) {
-      setCheckoutSuccessOrders(createdOrders);
+      if (createdOrders.length > 0) {
+        setCheckoutSuccessOrders(createdOrders);
+      }
+    } finally {
+      setCheckoutLoading(false);
     }
   };
 
-  const bgColor = config?.business_color || '#F97316';
+  const bgColor = (selectedStore && selectedStore.plan === 'PRO' && selectedStore.customTheme)
+    ? selectedStore.customTheme
+    : (config?.business_color || '#F97316');
 
   // Filter stores
-  const defaultStore = stores.find((s) => s.name.toLowerCase().includes('donde salo'));
-  const otherStores = stores.filter((s) => s.active && !s.name.toLowerCase().includes('donde salo'));
+  const storesArray = Array.isArray(stores) ? stores : [];
+  const productsArray = Array.isArray(products) ? products : [];
+  const deliveryZonesArray = Array.isArray(deliveryZones) ? deliveryZones : [];
+
+  const defaultStore = storesArray.find((s) => s && s.name && s.name.toLowerCase().includes('donde salo'));
+  const otherStores = storesArray.filter((s) => s && s.active && s.name && !s.name.toLowerCase().includes('donde salo'));
 
   const filteredStores = otherStores.filter((s) => {
     const matchesCategory = selectedCategory === 'TODOS' || s.category === selectedCategory;
-    const matchesSearch = s.name.toLowerCase().includes(searchStoreQuery.toLowerCase()) || 
+    const matchesSearch = (s.name && s.name.toLowerCase().includes(searchStoreQuery.toLowerCase())) || 
                           (s.description && s.description.toLowerCase().includes(searchStoreQuery.toLowerCase()));
     return matchesCategory && matchesSearch;
   });
 
   // Filter products for the selected store
-  const storeProducts = products.filter((p) => {
+  const storeProducts = productsArray.filter((p) => {
     if (!selectedStore) return true;
-    const isDefaultSelected = selectedStore.name.toLowerCase().includes('donde salo') || selectedStore.id === 'legacy-salo';
+    const isDefaultSelected = selectedStore.name && (selectedStore.name.toLowerCase().includes('donde salo') || selectedStore.id === 'legacy-salo');
     if (isDefaultSelected) {
       return !p.storeId || p.storeId === selectedStore.id || (defaultStore && p.storeId === defaultStore.id);
     }
     return p.storeId === selectedStore.id;
   }).filter((p) => {
-    const matchesSearch = p.name.toLowerCase().includes(searchProductQuery.toLowerCase()) || 
+    const matchesSearch = (p.name && p.name.toLowerCase().includes(searchProductQuery.toLowerCase())) || 
                           (p.description && p.description.toLowerCase().includes(searchProductQuery.toLowerCase()));
     return matchesSearch;
   });
@@ -358,9 +499,10 @@ export default function LandingPage() {
   };
 
   return (
-    <div className="min-h-screen bg-gray-50 dark:bg-gray-900 text-gray-800 dark:text-gray-100 flex flex-col font-sans transition-colors duration-300">
+    <div className="relative overflow-hidden min-h-screen bg-[#FFF8F0] dark:bg-gray-900 text-gray-800 dark:text-gray-100 flex flex-col font-sans transition-colors duration-300">
+
       {/* Header */}
-      <header className="sticky top-0 z-40 bg-white/85 dark:bg-gray-800/85 backdrop-blur-md shadow-sm border-b border-gray-100 dark:border-gray-700 transition">
+      <header className="relative z-40 sticky top-0 bg-white/80 dark:bg-gray-850/80 backdrop-blur-md shadow-xs border-b border-gray-100 dark:border-gray-800 transition">
         <div className="max-w-6xl mx-auto px-4 py-3.5 flex items-center justify-between">
           <button onClick={() => setSelectedStore(null)} className="flex items-center gap-2.5 text-xl font-bold" style={{ color: bgColor }}>
             <img
@@ -423,62 +565,116 @@ export default function LandingPage() {
       </header>
 
       {/* Main Content */}
-      <main className="flex-grow">
+      <main className="flex-grow relative z-10">
         {!selectedStore ? (
           // Marketplace View
           <div>
             {/* Hero Section */}
-            <section className="relative overflow-hidden py-16 px-4 bg-gradient-to-br from-orange-500/10 via-amber-500/5 to-transparent border-b border-gray-100 dark:border-gray-800">
-              <div className="max-w-4xl mx-auto text-center space-y-6">
-                <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-orange-100 dark:bg-orange-950/40 text-orange-600 dark:text-orange-400">
-                  <StoreIcon size={12} /> Portal Marketplace Local
-                </span>
-                <h1 className="text-4xl md:text-5xl font-black tracking-tight text-gray-900 dark:text-white leading-tight">
-                  Todo lo que necesitas, <br/>
-                  <span className="bg-gradient-to-r from-orange-500 to-amber-500 bg-clip-text text-transparent">en un solo lugar</span>
-                </h1>
-                <p className="text-base md:text-lg text-gray-600 dark:text-gray-300 max-w-2xl mx-auto font-medium">
-                  Vamos Donde Salo es un centro de comercio virtual donde compradores y vendedores de Puerto Colombia y Salgar se conectan. Compra comida rápida, productos de salud, compras, servicios y más. Todo contra entrega.
-                </p>
+            <section className="relative overflow-hidden py-12 md:py-20 px-4 bg-gradient-to-br from-orange-500/10 via-amber-500/5 to-transparent border-b border-gray-100 dark:border-gray-800">
+              <div className="max-w-6xl mx-auto grid grid-cols-1 lg:grid-cols-2 gap-12 items-center">
+                <div className="space-y-6 text-center lg:text-left">
+                  <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-orange-100 dark:bg-orange-950/40 text-orange-600 dark:text-orange-400">
+                    <StoreIcon size={12} /> Portal Marketplace Local
+                  </span>
+                  <h1 className="text-4xl md:text-5xl font-black tracking-tight text-gray-900 dark:text-white leading-tight">
+                    Tus productos favoritos <br/>
+                    <span className="bg-gradient-to-r from-orange-500 to-amber-500 bg-clip-text text-transparent">de la manera más rápida</span>
+                  </h1>
+                  <p className="text-base md:text-lg text-gray-600 dark:text-gray-300 max-w-xl mx-auto lg:mx-0 font-medium">
+                    Explora y compra de forma rápida y sencilla en todos los comercios locales de Puerto Colombia y Salgar. Elige productos frescos, fritos tradicionales y más, todo con entrega a domicilio directa y pago contra entrega.
+                  </p>
 
-                {/* Track Order Input */}
-                <div className="max-w-md mx-auto flex gap-2 pt-4">
-                  <div className="flex-1 relative">
-                    <Search size={18} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-gray-400" />
-                    <input
-                      type="text"
-                      placeholder="Seguimiento (ej: SALO-ABCDE)"
-                      value={trackingCode}
-                      onChange={(e) => setTrackingCode(e.target.value)}
-                      className="w-full pl-11 pr-4 py-3 rounded-2xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 outline-none focus:ring-2 focus:ring-orange-400 shadow-sm text-sm"
-                    />
+                  {/* Track Order Input */}
+                  <div className="max-w-md mx-auto lg:mx-0 flex gap-2 pt-2">
+                    <div className="flex-1 relative">
+                      <Search size={18} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-gray-400" />
+                      <input
+                        type="text"
+                        placeholder="Seguimiento (ej: SALO-ABCDE)"
+                        value={trackingCode}
+                        onChange={(e) => setTrackingCode(e.target.value)}
+                        className="w-full pl-11 pr-4 py-3 rounded-2xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 outline-none focus:ring-2 focus:ring-orange-400 shadow-xs text-sm transition focus:shadow-md"
+                      />
+                    </div>
+                    <Link 
+                      href={`/seguir-pedido?code=${encodeURIComponent(trackingCode)}`} 
+                      className="px-5 py-3 text-white rounded-2xl font-bold hover:opacity-95 shadow-md transition flex items-center gap-2 text-sm shrink-0" 
+                      style={{ backgroundColor: bgColor }}
+                    >
+                      <Clock size={16} /> Seguir
+                    </Link>
                   </div>
-                  <Link 
-                    href={`/seguir-pedido?code=${encodeURIComponent(trackingCode)}`} 
-                    className="px-5 py-3 text-white rounded-2xl font-bold hover:opacity-95 shadow-md transition flex items-center gap-2 text-sm" 
-                    style={{ backgroundColor: bgColor }}
+                </div>
+
+                {/* Staggered dynamic tilt photos */}
+                <div className="relative h-[340px] md:h-[420px] w-full flex items-center justify-center">
+                  {/* Beach photo 1 */}
+                  <div
+                    onMouseMove={(e) => handlePhotoMouseMove(e, 0)}
+                    onMouseLeave={handlePhotoMouseLeave}
+                    className="absolute left-[5%] top-[10%] w-[50%] aspect-video md:w-[48%] rounded-2xl overflow-hidden shadow-lg border border-white/40 dark:border-gray-700/40 cursor-pointer select-none z-10 bg-gray-200 dark:bg-gray-800"
+                    style={{
+                      transform: hoveredPhotoIdx === 0
+                        ? `perspective(1000px) rotateX(${-tiltCoords.y * 12}deg) rotateY(${tiltCoords.x * 12}deg) scale3d(1.06, 1.06, 1.06) translateZ(15px) rotate(-6deg)`
+                        : 'perspective(1000px) rotateX(0deg) rotateY(0deg) scale3d(1, 1, 1) translateZ(0) rotate(-6deg)',
+                      transition: hoveredPhotoIdx === 0 ? 'none' : 'transform 0.4s ease-out',
+                    }}
                   >
-                    <Clock size={16} /> Seguir
-                  </Link>
+                    <img src="/hero_beach1.jpg" alt="Playas de Puerto Colombia" className="w-full h-full object-cover" />
+                    <div className="absolute bottom-0 inset-x-0 bg-black/40 backdrop-blur-xs py-2 px-3 text-white text-[11px] font-bold text-center truncate">
+                      Playas de Puerto Colombia
+                    </div>
+                  </div>
+
+                  {/* Beach photo 2 */}
+                  <div
+                    onMouseMove={(e) => handlePhotoMouseMove(e, 1)}
+                    onMouseLeave={handlePhotoMouseLeave}
+                    className="absolute right-[5%] top-[5%] w-[55%] aspect-video md:w-[52%] rounded-2xl overflow-hidden shadow-xl border border-white/40 dark:border-gray-700/40 cursor-pointer select-none z-20 bg-gray-200 dark:bg-gray-800"
+                    style={{
+                      transform: hoveredPhotoIdx === 1
+                        ? `perspective(1000px) rotateX(${-tiltCoords.y * 12}deg) rotateY(${tiltCoords.x * 12}deg) scale3d(1.06, 1.06, 1.06) translateZ(15px) rotate(3deg)`
+                        : 'perspective(1000px) rotateX(0deg) rotateY(0deg) scale3d(1, 1, 1) translateZ(0) rotate(3deg)',
+                      transition: hoveredPhotoIdx === 1 ? 'none' : 'transform 0.4s ease-out',
+                    }}
+                  >
+                    <img src="/hero_beach2.jpg" alt="Plaza de Puerto Colombia" className="w-full h-full object-cover" />
+                    <div className="absolute bottom-0 inset-x-0 bg-black/40 backdrop-blur-xs py-2 px-3 text-white text-[11px] font-bold text-center truncate">
+                      Plaza de Puerto Colombia
+                    </div>
+                  </div>
+
+                  {/* Beach photo 3 */}
+                  <div
+                    onMouseMove={(e) => handlePhotoMouseMove(e, 2)}
+                    onMouseLeave={handlePhotoMouseLeave}
+                    className="absolute left-[20%] bottom-[8%] w-[52%] aspect-video md:w-[48%] rounded-2xl overflow-hidden shadow-md border border-white/40 dark:border-gray-700/40 cursor-pointer select-none z-30 bg-gray-200 dark:bg-gray-800"
+                    style={{
+                      transform: hoveredPhotoIdx === 2
+                        ? `perspective(1000px) rotateX(${-tiltCoords.y * 12}deg) rotateY(${tiltCoords.x * 12}deg) scale3d(1.06, 1.06, 1.06) translateZ(15px) rotate(-2deg)`
+                        : 'perspective(1000px) rotateX(0deg) rotateY(0deg) scale3d(1, 1, 1) translateZ(0) rotate(-2deg)',
+                      transition: hoveredPhotoIdx === 2 ? 'none' : 'transform 0.4s ease-out',
+                    }}
+                  >
+                    <img src="/hero_beach3.jpg" alt="Malecón de Puerto Colombia" className="w-full h-full object-cover" />
+                    <div className="absolute bottom-0 inset-x-0 bg-black/40 backdrop-blur-xs py-2 px-3 text-white text-[11px] font-bold text-center truncate">
+                      Malecón de Puerto Colombia
+                    </div>
+                  </div>
                 </div>
               </div>
             </section>
 
             {/* Showcase Fritos Donde Salo! */}
             {defaultStore && (
-              <section className="py-10 px-4 max-w-6xl mx-auto">
+              <section className="py-12 px-4 max-w-6xl mx-auto space-y-8 relative z-10">
                 <div className="bg-gradient-to-r from-orange-500 to-amber-500 rounded-3xl p-6 md:p-8 text-white shadow-xl flex flex-col md:flex-row items-center justify-between gap-6 hover:shadow-2xl transition duration-300 relative overflow-hidden">
-                  <img 
-                    src="/logo.jpg" 
-                    alt="" 
-                    className="absolute inset-0 w-full h-full object-cover opacity-15 mix-blend-overlay pointer-events-none" 
-                  />
                   <div className="space-y-3 text-center md:text-left relative z-10">
                     <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-white/20 text-white uppercase tracking-wider">
-                      ★ Tienda Destacada Original
+                      ★ Tienda Original Destacada
                     </div>
                     <h2 className="text-3xl font-black">{defaultStore.name}</h2>
-                    <p className="text-white/95 text-sm md:text-base max-w-xl">
+                    <p className="text-white/95 text-sm md:text-base max-w-xl leading-relaxed">
                       {defaultStore.description || 'El templo de los mejores fritos y comida rápida. Arepas de huevo, empanadas, hamburguesas y más.'}
                     </p>
                   </div>
@@ -487,20 +683,57 @@ export default function LandingPage() {
                       ...defaultStore,
                       id: defaultStore.id || 'legacy-salo'
                     })}
-                    className="px-6 py-4 bg-white text-orange-600 font-extrabold rounded-2xl hover:bg-orange-50 active:scale-95 transition shadow-md w-full md:w-auto text-center shrink-0 relative z-10"
+                    className="px-6 py-4 bg-white text-orange-600 font-extrabold rounded-2xl hover:bg-orange-50 active:scale-95 transition shadow-md w-full md:w-auto text-center shrink-0 relative z-10 text-sm"
                   >
-                    ¡Entrar a la tienda original aquí!
+                    Ver Menú Completo →
                   </button>
+                </div>
+
+                {/* Real-time Administrative Stock Products */}
+                <div className="space-y-5">
+                  <div className="flex items-center justify-between border-b border-gray-250/50 dark:border-gray-800 pb-3">
+                    <div>
+                      <h3 className="text-xl font-extrabold text-gray-900 dark:text-white flex items-center gap-2">
+                        <span>🍽️ Fritos & Productos en Stock (Donde Salo!)</span>
+                      </h3>
+                      <p className="text-xs text-gray-400 mt-1">Disponibles ahora según stock de la tienda</p>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-5">
+                    {productsArray.filter((p) => !p.storeId || (defaultStore && p.storeId === defaultStore.id)).slice(0, 4).map((product) => (
+                      <div key={product.id} className="bg-white dark:bg-gray-800/60 rounded-3xl p-3 shadow-xs border border-gray-150/40 dark:border-gray-700/60 flex flex-col hover:shadow-md transition">
+                        <div className="aspect-square rounded-2xl overflow-hidden mb-3 bg-gray-100 dark:bg-gray-700 relative border border-gray-100 dark:border-gray-700/50">
+                          {product.photoUrl ? (
+                            <img src={product.photoUrl} alt={product.name} className="w-full h-full object-cover" />
+                          ) : (
+                            <div className="w-full h-full flex items-center justify-center text-gray-400 text-xs">Sin imagen</div>
+                          )}
+                        </div>
+                        <h3 className="font-bold text-sm truncate px-1 text-gray-900 dark:text-white">{product.name}</h3>
+                        <p className="text-xs text-gray-500 line-clamp-2 mb-3 mt-1 px-1 flex-grow leading-relaxed">{product.description}</p>
+                        <div className="flex items-center justify-between mt-auto pt-2 border-t border-gray-100 dark:border-gray-700 px-1">
+                          <p className="text-base font-extrabold text-orange-500">${product.salePrice.toLocaleString('es-CO')}</p>
+                          <button
+                            onClick={() => addToCart(product)}
+                            className="p-2.5 rounded-xl text-white bg-orange-500 hover:bg-orange-600 transition active:scale-95 shadow-sm"
+                          >
+                            <Plus size={16} />
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
                 </div>
               </section>
             )}
 
             {/* Other Stores Marketplace List */}
-            <section className="py-8 px-4 max-w-6xl mx-auto space-y-8">
-              <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-gray-200/60 dark:border-gray-800 pb-5">
+            <section className="py-10 px-4 max-w-6xl mx-auto space-y-8 relative z-10 border-t border-gray-200/40 dark:border-gray-800">
+              <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
                 <div>
-                  <h3 className="text-2xl font-bold tracking-tight">Otras Tiendas & Negocios</h3>
-                  <p className="text-sm text-gray-500 dark:text-gray-400">Apoya a los comerciantes locales de tu sector</p>
+                  <h3 className="text-2xl font-bold tracking-tight text-gray-900 dark:text-white">Explora Otras Tiendas Locales</h3>
+                  <p className="text-sm text-gray-500 dark:text-gray-400 mt-0.5">Apoya el emprendimiento y los comercios locales de tu sector</p>
                 </div>
                 {/* Search Store Bar */}
                 <div className="w-full md:max-w-xs relative">
@@ -510,7 +743,7 @@ export default function LandingPage() {
                     placeholder="Buscar tiendas..."
                     value={searchStoreQuery}
                     onChange={(e) => setSearchStoreQuery(e.target.value)}
-                    className="w-full pl-10 pr-4 py-2.5 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-sm outline-none focus:ring-2 focus:ring-orange-400"
+                    className="w-full pl-10 pr-4 py-2.5 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-sm outline-none focus:ring-2 focus:ring-orange-400 transition"
                   />
                 </div>
               </div>
@@ -524,7 +757,7 @@ export default function LandingPage() {
                     className={`px-4 py-2 rounded-xl text-sm font-bold whitespace-nowrap border transition ${
                       selectedCategory === cat
                         ? 'border-orange-500 bg-orange-500 text-white shadow-sm'
-                        : 'border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-750'
+                        : 'border-gray-200 dark:border-gray-750 bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-750'
                     }`}
                   >
                     {cat === 'TODOS' ? '🏠 Todas' : getCategoryLabel(cat)}
@@ -538,23 +771,28 @@ export default function LandingPage() {
                   <div
                     key={store.id}
                     onClick={() => setSelectedStore(store)}
-                    className="bg-white dark:bg-gray-800/60 rounded-3xl p-5 border border-gray-150/50 dark:border-gray-700/50 shadow-sm hover:shadow-md hover:border-orange-500/40 dark:hover:border-orange-500/40 transition cursor-pointer flex gap-4 group"
+                    className="bg-white dark:bg-gray-800 rounded-2xl p-5 border border-gray-150/60 dark:border-gray-750/70 shadow-xs hover:shadow-md hover:border-orange-500/40 transition-all duration-300 cursor-pointer flex gap-4 group hover:-translate-y-1"
                   >
-                    <div className="w-16 h-16 rounded-2xl overflow-hidden bg-gray-100 dark:bg-gray-700 flex-shrink-0 border border-gray-100 dark:border-gray-750 relative">
+                    <div className="w-16 h-16 rounded-xl overflow-hidden bg-gray-50 dark:bg-gray-700 flex-shrink-0 border border-gray-100 dark:border-gray-700 relative shadow-xs">
                       {store.logoUrl ? (
-                        <img src={store.logoUrl} alt={store.name} className="w-full h-full object-cover group-hover:scale-105 transition" />
+                        <img src={store.logoUrl} alt={store.name} className="w-full h-full object-cover group-hover:scale-105 transition duration-300" />
                       ) : (
                         <div className="w-full h-full flex items-center justify-center text-gray-400 dark:text-gray-500"><StoreIcon size={24} /></div>
                       )}
                     </div>
-                    <div className="flex-grow min-w-0 space-y-1">
+                    <div className="flex-grow min-w-0 space-y-1.5">
                       <div className="flex items-center justify-between gap-2">
-                        <span className="text-[10px] font-extrabold uppercase px-2 py-0.5 rounded-md bg-orange-100 dark:bg-orange-950/40 text-orange-600 dark:text-orange-400">
+                        <span className="text-[9px] font-extrabold uppercase px-2 py-0.5 rounded bg-orange-50 dark:bg-orange-950/20 text-orange-600 dark:text-orange-400 tracking-wider">
                           {getCategoryLabel(store.category)}
                         </span>
+                        {store.plan === 'PRO' && (
+                          <span className="text-[9px] font-extrabold px-2 py-0.5 bg-amber-50 dark:bg-amber-950/20 text-amber-600 dark:text-amber-400 rounded border border-amber-250/20">
+                            PRO
+                          </span>
+                        )}
                       </div>
-                      <h4 className="font-bold text-base truncate group-hover:text-orange-500 transition">{store.name}</h4>
-                      <p className="text-xs text-gray-500 dark:text-gray-400 line-clamp-2 leading-relaxed">{store.description || 'Sin descripción disponible.'}</p>
+                      <h4 className="font-extrabold text-base text-gray-900 dark:text-white truncate group-hover:text-orange-500 transition duration-200">{store.name}</h4>
+                      <p className="text-xs text-gray-500 dark:text-gray-400 line-clamp-2 leading-relaxed font-medium">{store.description || 'Sin descripción disponible.'}</p>
                     </div>
                   </div>
                 ))}
@@ -570,7 +808,83 @@ export default function LandingPage() {
           </div>
         ) : (
           // Store Detail View
-          <div className="max-w-6xl mx-auto px-4 py-8 space-y-8">
+          <div className="max-w-6xl mx-auto px-4 py-8 space-y-8 relative z-10">
+            {/* Promo Carousel */}
+            {selectedStore.plan === 'PRO' && promoMediaItems.length > 0 && (
+              <div className="relative w-full h-64 md:h-96 rounded-3xl overflow-hidden shadow-lg border border-gray-150/50 dark:border-gray-800 bg-black group-carousel">
+                {promoMediaItems.map((item, idx) => {
+                  const isActive = idx === currentPromoIndex;
+                  return (
+                    <div
+                      key={idx}
+                      className={`absolute inset-0 transition-opacity duration-700 flex items-center justify-center ${
+                        isActive ? 'opacity-100 z-10' : 'opacity-0 z-0 pointer-events-none'
+                      }`}
+                    >
+                      {item.type === 'VIDEO' ? (
+                        <video
+                          src={item.url}
+                          controls
+                          muted
+                          autoPlay={isActive}
+                          playsInline
+                          className="w-full h-full object-contain"
+                          onEnded={() => {
+                            if (promoMediaItems.length > 1) {
+                              setCurrentPromoIndex((prev) => (prev + 1) % promoMediaItems.length);
+                            }
+                          }}
+                        />
+                      ) : (
+                        <img
+                          src={item.url}
+                          alt={`Promo ${idx}`}
+                          className="w-full h-full object-cover"
+                        />
+                      )}
+                    </div>
+                  );
+                })}
+
+                {/* Left/Right Controls */}
+                {promoMediaItems.length > 1 && (
+                  <>
+                    <button
+                      onClick={() =>
+                        setCurrentPromoIndex(
+                          (prev) => (prev - 1 + promoMediaItems.length) % promoMediaItems.length
+                        )
+                      }
+                      className="absolute left-4 top-1/2 -translate-y-1/2 z-20 p-2.5 rounded-full bg-black/40 hover:bg-black/60 text-white transition backdrop-blur-sm"
+                    >
+                      <ChevronLeft size={20} />
+                    </button>
+                    <button
+                      onClick={() =>
+                        setCurrentPromoIndex((prev) => (prev + 1) % promoMediaItems.length)
+                      }
+                      className="absolute right-4 top-1/2 -translate-y-1/2 z-20 p-2.5 rounded-full bg-black/40 hover:bg-black/60 text-white transition backdrop-blur-sm"
+                    >
+                      <ChevronRight size={20} />
+                    </button>
+
+                    {/* Dots indicator */}
+                    <div className="absolute bottom-4 left-1/2 -translate-x-1/2 z-20 flex gap-2">
+                      {promoMediaItems.map((_, idx) => (
+                        <button
+                          key={idx}
+                          onClick={() => setCurrentPromoIndex(idx)}
+                          className={`w-2 h-2 rounded-full transition-all duration-300 ${
+                            idx === currentPromoIndex ? 'bg-white w-4' : 'bg-white/50'
+                          }`}
+                        />
+                      ))}
+                    </div>
+                  </>
+                )}
+              </div>
+            )}
+
             {/* Store Header Info */}
             <div className="flex flex-col md:flex-row items-center md:items-start justify-between gap-6 border-b border-gray-200/60 dark:border-gray-800 pb-6">
               <div className="flex flex-col md:flex-row items-center md:items-start gap-5 text-center md:text-left">
@@ -593,6 +907,11 @@ export default function LandingPage() {
                     <span className="text-xs font-bold uppercase px-2.5 py-0.5 rounded-full bg-orange-100 dark:bg-orange-950/40 text-orange-600 dark:text-orange-400">
                       {getCategoryLabel(selectedStore.category)}
                     </span>
+                    {selectedStore.plan === 'PRO' && (
+                      <span className="bg-gradient-to-r from-purple-600 to-indigo-600 text-white text-[11px] font-extrabold px-2.5 py-0.5 rounded-full uppercase tracking-wider shadow-sm flex items-center gap-0.5 animate-pulse">
+                        💎 Tienda PRO
+                      </span>
+                    )}
                   </div>
                   <p className="text-sm text-gray-500 dark:text-gray-400 max-w-xl">{selectedStore.description || 'Bienvenido a nuestra tienda.'}</p>
                 </div>
@@ -648,17 +967,67 @@ export default function LandingPage() {
         )}
       </main>
 
-      {/* Footer */}
-      <footer className="bg-white dark:bg-gray-800 border-t border-gray-100 dark:border-gray-700 py-8 px-4 text-center mt-12 transition">
-        <div className="flex items-center justify-center gap-4 mb-4">
-          <a href={`https://wa.me/${config?.whatsapp_number || '573001234567'}`} target="_blank" rel="noopener noreferrer" className="p-3 bg-green-500 text-white rounded-full hover:scale-110 shadow-sm transition">
-            <Phone size={20} />
-          </a>
+      {/* Professional Footer */}
+      <footer className="relative z-10 bg-gray-900 text-gray-400 dark:bg-gray-950 border-t border-gray-850 py-12 px-6 mt-16 transition">
+        <div className="max-w-6xl mx-auto grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-10 text-left">
+          {/* Col 1 */}
+          <div className="space-y-4">
+            <div className="flex items-center gap-2.5 text-white font-black text-lg">
+              <img src="/logo.jpg" alt="" className="w-8 h-8 rounded-full object-cover border border-gray-700" />
+              <span>Vamos Donde Salo</span>
+            </div>
+            <p className="text-xs text-gray-550 leading-relaxed">
+              La plataforma número uno de comercio local y digitalización en Puerto Colombia. Conectamos pequeños comerciantes y clientes de forma directa, confiable y contra entrega.
+            </p>
+          </div>
+
+          {/* Col 2 */}
+          <div className="space-y-3">
+            <h4 className="text-sm font-bold uppercase tracking-wider text-white">Enlaces Rápidos</h4>
+            <ul className="space-y-2 text-xs">
+              <li><button onClick={() => setSelectedStore(null)} className="hover:text-white transition">Marketplace Principal</button></li>
+              <li><Link href="/register-merchant" className="hover:text-white transition">Registrar mi Tienda</Link></li>
+              <li><Link href="/login" className="hover:text-white transition">Acceso Comercial</Link></li>
+              <li><Link href="/seguir-pedido" className="hover:text-white transition">Rastreo de Pedidos</Link></li>
+            </ul>
+          </div>
+
+          {/* Col 3 */}
+          <div className="space-y-3">
+            <h4 className="text-sm font-bold uppercase tracking-wider text-white">Soporte y Contacto</h4>
+            <ul className="space-y-2 text-xs">
+              <li className="flex items-center gap-2">
+                <MapPin size={14} className="shrink-0" />
+                <span>Malecón de Puerto Colombia, Local 3</span>
+              </li>
+              <li className="flex items-center gap-2">
+                <Phone size={14} className="shrink-0" />
+                <span>WhatsApp: {config?.whatsapp_number || '+57 300 123 4567'}</span>
+              </li>
+              <li><span>Email: soporte@vamosdondesalo.co</span></li>
+            </ul>
+          </div>
+
+          {/* Col 4 */}
+          <div className="space-y-3">
+            <h4 className="text-sm font-bold uppercase tracking-wider text-white">Legal e Información</h4>
+            <ul className="space-y-2 text-xs text-gray-500">
+              <li><a href="#" className="hover:text-gray-300 transition">Términos y Condiciones</a></li>
+              <li><a href="#" className="hover:text-gray-300 transition">Políticas de Privacidad</a></li>
+              <li><a href="#" className="hover:text-gray-300 transition">Cookies</a></li>
+              <li><a href="#" className="hover:text-gray-300 transition">Acuerdo Comercial de SaaS</a></li>
+            </ul>
+          </div>
         </div>
-        <div className="flex items-center justify-center gap-2 text-gray-500 mb-2 text-sm font-medium">
-          <MapPin size={16} /> Puerto Colombia, Colombia
+
+        <div className="max-w-6xl mx-auto border-t border-gray-800 mt-10 pt-6 flex flex-col sm:flex-row items-center justify-between gap-4 text-xs text-gray-500">
+          <p>© {new Date().getFullYear()} {config?.business_name || 'Vamos Donde Salo'}. Todos los derechos reservados.</p>
+          <div className="flex items-center gap-4">
+            <a href={`https://wa.me/${config?.whatsapp_number || '573001234567'}`} target="_blank" rel="noopener noreferrer" className="p-2 bg-green-500/10 hover:bg-green-500/20 text-green-500 rounded-full transition shadow-xs">
+              <Phone size={16} />
+            </a>
+          </div>
         </div>
-        <p className="text-xs text-gray-400">© {new Date().getFullYear()} {config?.business_name || 'Vamos Donde Salo'}. Todos los derechos reservados.</p>
       </footer>
 
       {/* Cart Drawer */}
@@ -680,7 +1049,7 @@ export default function LandingPage() {
                 Object.keys(groupedCart).map((storeId) => {
                   const group = groupedCart[storeId];
                   const storeSubtotal = group.items.reduce((sum, item) => sum + item.product.salePrice * item.qty, 0);
-                  const storeFee = getStoreDeliveryFee(storeSubtotal);
+                  const storeFee = getStoreDeliveryFee(storeSubtotal, group.store);
                   return (
                     <div key={storeId} className="space-y-3 border-b border-gray-150/40 dark:border-gray-700/60 pb-5 last:border-b-0">
                       <div className="flex items-center justify-between bg-gray-50 dark:bg-gray-750 px-3 py-2 rounded-xl">
@@ -809,36 +1178,94 @@ export default function LandingPage() {
                   onChange={(e) => setCustomerData({ ...customerData, address: e.target.value })}
                   className="w-full px-4 py-3 rounded-xl border border-gray-200 dark:border-gray-750 bg-gray-50 dark:bg-gray-750 outline-none focus:ring-2 focus:ring-orange-400 text-sm"
                 />
-                <select
-                  value={customerData.zone}
-                  onChange={(e) => setCustomerData({ ...customerData, zone: e.target.value })}
-                  className="w-full px-4 py-3 rounded-xl border border-gray-200 dark:border-gray-750 bg-gray-50 dark:bg-gray-750 outline-none focus:ring-2 focus:ring-orange-400 text-sm"
-                >
-                  <option value="">Selecciona zona de domicilio</option>
-                  {deliveryZones.map((zone) => (
-                    <option key={zone.id} value={zone.id}>
-                      {zone.name} (${zone.fee.toLocaleString('es-CO')})
-                    </option>
-                  ))}
-                </select>
 
-                {customerData.zone && (
-                  <div className="bg-orange-50 dark:bg-orange-950/20 border border-orange-100 dark:border-orange-900/40 rounded-xl p-3 text-xs text-orange-600 dark:text-orange-400 font-medium space-y-1">
-                    <p>ℹ️ Políticas de Domicilio Gratuito por tienda:</p>
-                    <ul className="list-disc pl-4 space-y-0.5">
-                      <li>Puerto Colombia / Pradomar: Gratis por compras mayores a $10.000 COP en la respectiva tienda.</li>
-                      <li>Salgar: Gratis por compras mayores a $18.000 COP en la respectiva tienda.</li>
-                    </ul>
+                <div className="space-y-1">
+                  <input
+                    type="text"
+                    placeholder="Número de identificación (Opcional)"
+                    value={customerData.doc}
+                    onChange={(e) => setCustomerData({ ...customerData, doc: e.target.value })}
+                    className="w-full px-4 py-3 rounded-xl border border-gray-200 dark:border-gray-750 bg-gray-50 dark:bg-gray-750 outline-none focus:ring-2 focus:ring-orange-400 text-sm"
+                  />
+                  <p className="text-[10px] text-gray-400 dark:text-gray-500 px-1.5">
+                    💡 Con tu número de identificación puedes rastrear tu pedido en tiempo real más tarde.
+                  </p>
+                </div>
+
+                <div className="flex items-center gap-2.5 py-1">
+                  <input
+                    type="checkbox"
+                    id="envioNacional"
+                    checked={customerData.nacional}
+                    onChange={(e) => setCustomerData({ ...customerData, nacional: e.target.checked, zone: e.target.checked ? '' : customerData.zone })}
+                    className="w-4 h-4 rounded text-orange-500 border-gray-300 focus:ring-orange-400 focus:ring-2"
+                  />
+                  <label htmlFor="envioNacional" className="text-sm font-bold text-gray-700 dark:text-gray-300 cursor-pointer">
+                    ¿Es envío nacional?
+                  </label>
+                </div>
+
+                {!customerData.nacional ? (
+                  <>
+                    <div className="space-y-2">
+                      <label className="block text-xs font-extrabold uppercase text-gray-400 dark:text-gray-500 tracking-wider mb-1">
+                        Selecciona zona de domicilio
+                      </label>
+                      <div className="grid grid-cols-2 gap-2.5">
+                        {deliveryZonesArray.map((zone) => {
+                          const isSelected = customerData.zone === zone.id;
+                          return (
+                            <button
+                              key={zone.id}
+                              type="button"
+                              onClick={() => setCustomerData({ ...customerData, zone: zone.id })}
+                              className={`p-3.5 rounded-2xl border text-left font-bold text-xs transition-all flex flex-col gap-0.5 relative overflow-hidden ${
+                                isSelected
+                                  ? 'border-orange-500 bg-orange-500 text-white shadow-sm scale-[1.02]'
+                                  : 'border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-750'
+                              }`}
+                            >
+                              <span className="font-extrabold truncate">{zone.name}</span>
+                              <span className={`text-[9px] font-medium ${isSelected ? 'text-orange-100' : 'text-gray-400'}`}>
+                                Domicilio listo para cargar
+                              </span>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+
+                    {customerData.zone && (
+                      <div className="bg-orange-50 dark:bg-orange-950/20 border border-orange-100/40 dark:border-orange-900/20 rounded-xl p-3 text-xs text-orange-600 dark:text-orange-400 font-medium space-y-1">
+                        <p>ℹ️ Políticas de Domicilio Gratuito por tienda:</p>
+                        <ul className="list-disc pl-4 space-y-0.5">
+                          <li>Puerto Colombia / Pradomar: Gratis por compras mayores a $10.000 COP en la respectiva tienda.</li>
+                          <li>Salgar: Gratis por compras mayores a $18.000 COP en la respectiva tienda.</li>
+                        </ul>
+                      </div>
+                    )}
+                  </>
+                ) : (
+                  <div className="bg-green-50 dark:bg-green-950/20 border border-green-150/40 dark:border-green-900/20 rounded-xl p-3 text-xs text-green-700 dark:text-green-400 font-bold">
+                    🚚 ¡Envío Nacional activado! Cuádralo con el comerciante por WhatsApp al terminar la compra.
                   </div>
                 )}
               </div>
 
               <button
                 onClick={handleCheckout}
-                className="w-full py-4 text-white rounded-2xl font-bold hover:opacity-95 transition shadow-md mt-4 text-sm"
+                disabled={checkoutLoading}
+                className="w-full py-4 text-white rounded-2xl font-bold hover:opacity-95 transition shadow-md mt-4 text-sm flex items-center justify-center gap-2 disabled:opacity-50"
                 style={{ backgroundColor: bgColor }}
               >
-                Confirmar y generar pedidos
+                {checkoutLoading ? (
+                  <>
+                    <span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></span>
+                    Procesando pedidos...
+                  </>
+                ) : (
+                  'Confirmar y generar pedidos'
+                )}
               </button>
             </div>
           </div>
@@ -882,7 +1309,7 @@ export default function LandingPage() {
                 setCart([]);
                 setShowCheckout(false);
                 setShowCart(false);
-                setCustomerData({ name: '', phone: '', address: '', zone: '' });
+                setCustomerData({ name: '', phone: '', address: '', zone: '', doc: '', nacional: false });
                 setSelectedStore(null);
               }}
               className="w-full py-3 bg-gray-900 dark:bg-gray-100 dark:text-gray-900 text-white rounded-2xl font-extrabold transition text-sm hover:opacity-90 shadow-sm"
