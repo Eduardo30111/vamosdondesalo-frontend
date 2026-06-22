@@ -55,10 +55,9 @@ export default function AdminPage() {
   const [vitrina, setVitrina] = useState<VitrinaItem[]>([]);
   const [loading, setLoading] = useState(true);
 
-  const [chartFrom, setChartFrom] = useState(getDaysAgo(6));
-  const [chartTo, setChartTo] = useState(toLocalDateInputValue(new Date()));
-  const [productsFrom, setProductsFrom] = useState(toLocalDateInputValue(new Date()));
-  const [productsTo, setProductsTo] = useState(toLocalDateInputValue(new Date()));
+  const todayDate = toLocalDateInputValue(new Date());
+  const [chartDate, setChartDate] = useState(todayDate);
+  const [productsDate, setProductsDate] = useState(todayDate);
 
   useEffect(() => {
     loadStats();
@@ -68,23 +67,31 @@ export default function AdminPage() {
 
   useEffect(() => {
     if (stats) {
-      loadChart(chartFrom, chartTo);
+      if (chartDate === todayDate) {
+        loadChart(getDaysAgo(6), todayDate);
+      } else {
+        loadChart(chartDate, chartDate);
+      }
     }
-  }, [chartFrom, chartTo]);
+  }, [chartDate]);
 
   useEffect(() => {
     if (stats) {
-      loadTopProducts(productsFrom, productsTo);
+      loadTopProducts(productsDate, productsDate);
     }
-  }, [productsFrom, productsTo]);
+  }, [productsDate]);
 
   const loadStats = async () => {
+    const today = toLocalDateInputValue(new Date());
+    const cFrom = chartDate === today ? getDaysAgo(6) : chartDate;
+    const cTo = chartDate === today ? today : chartDate;
+
     try {
       const [statsData, weeklyData, hourlyData, topProductsData, vitrinaData] = await Promise.all([
         api.get<DashboardStats>('/dashboard/stats'),
-        api.get<Array<{ date: string; total: number }>>(`/dashboard/weekly-chart?from=${chartFrom}&to=${chartTo}`),
+        api.get<Array<{ date: string; total: number }>>(`/dashboard/weekly-chart?from=${cFrom}&to=${cTo}`),
         api.get<{ hourlyOrders: number[] }>('/dashboard/hourly'),
-        api.get<Array<{ name: string; count: number }>>(`/dashboard/top-products?from=${productsFrom}&to=${productsTo}`),
+        api.get<Array<{ name: string; count: number }>>(`/dashboard/top-products?from=${productsDate}&to=${productsDate}`),
         api.get<VitrinaItem[]>('/products'),
       ]);
       setStats({
@@ -228,21 +235,24 @@ export default function AdminPage() {
         {/* Weekly Sales Chart */}
         <div className="bg-white dark:bg-gray-800 rounded-2xl p-5 shadow-sm border border-gray-100 dark:border-gray-700">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4">
-            <h3 className="font-bold">Ventas por Período</h3>
+            <h3 className="font-bold">
+              {chartDate === todayDate ? 'Ventas de la Semana' : 'Ventas del Día'}
+            </h3>
             <div className="flex items-center gap-2 text-xs">
               <input
                 type="date"
-                value={chartFrom}
-                onChange={(e) => setChartFrom(e.target.value)}
-                className="px-2 py-1 rounded-lg border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300"
+                value={chartDate}
+                onChange={(e) => setChartDate(e.target.value)}
+                className="px-2 py-1 rounded-lg border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 outline-none"
               />
-              <span className="text-gray-400">al</span>
-              <input
-                type="date"
-                value={chartTo}
-                onChange={(e) => setChartTo(e.target.value)}
-                className="px-2 py-1 rounded-lg border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300"
-              />
+              {chartDate !== todayDate && (
+                <button
+                  onClick={() => setChartDate(todayDate)}
+                  className="px-2.5 py-1 bg-salo-orange hover:bg-orange-600 text-white rounded-lg font-bold transition"
+                >
+                  Actual
+                </button>
+              )}
             </div>
           </div>
           <ResponsiveContainer width="100%" height={200}>
@@ -274,21 +284,24 @@ export default function AdminPage() {
       {/* Top Products */}
       <div className="bg-white dark:bg-gray-800 rounded-2xl p-5 shadow-sm border border-gray-100 dark:border-gray-700">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4">
-          <h3 className="font-bold">Productos Más Vendidos</h3>
+          <h3 className="font-bold">
+            {productsDate === todayDate ? 'Productos Más Vendidos (Hoy)' : 'Productos Más Vendidos'}
+          </h3>
           <div className="flex items-center gap-2 text-xs">
             <input
               type="date"
-              value={productsFrom}
-              onChange={(e) => setProductsFrom(e.target.value)}
-              className="px-2 py-1 rounded-lg border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300"
+              value={productsDate}
+              onChange={(e) => setProductsDate(e.target.value)}
+              className="px-2 py-1 rounded-lg border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 outline-none"
             />
-            <span className="text-gray-400">al</span>
-            <input
-              type="date"
-              value={productsTo}
-              onChange={(e) => setProductsTo(e.target.value)}
-              className="px-2 py-1 rounded-lg border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300"
-            />
+            {productsDate !== todayDate && (
+              <button
+                onClick={() => setProductsDate(todayDate)}
+                className="px-2.5 py-1 bg-salo-orange hover:bg-orange-600 text-white rounded-lg font-bold transition"
+              >
+                Actual
+              </button>
+            )}
           </div>
         </div>
         <div className="space-y-3">
