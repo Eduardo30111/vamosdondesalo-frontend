@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import { toast } from 'sonner';
 import { api } from '@/lib/api';
-import { formatCurrency } from '@/lib/utils';
+import { formatCurrency, toLocalDateInputValue } from '@/lib/utils';
 import {
   ShoppingCart,
   DollarSign,
@@ -44,10 +44,21 @@ interface VitrinaItem {
   vitrinaStock: { qty: number } | null;
 }
 
+const getDaysAgo = (num: number) => {
+  const d = new Date();
+  d.setDate(d.getDate() - num);
+  return toLocalDateInputValue(d);
+};
+
 export default function AdminPage() {
   const [stats, setStats] = useState<DashboardStats | null>(null);
   const [vitrina, setVitrina] = useState<VitrinaItem[]>([]);
   const [loading, setLoading] = useState(true);
+
+  const [chartFrom, setChartFrom] = useState(getDaysAgo(6));
+  const [chartTo, setChartTo] = useState(toLocalDateInputValue(new Date()));
+  const [productsFrom, setProductsFrom] = useState(toLocalDateInputValue(new Date()));
+  const [productsTo, setProductsTo] = useState(toLocalDateInputValue(new Date()));
 
   useEffect(() => {
     loadStats();
@@ -55,13 +66,25 @@ export default function AdminPage() {
     return () => clearInterval(interval);
   }, []);
 
+  useEffect(() => {
+    if (stats) {
+      loadChart(chartFrom, chartTo);
+    }
+  }, [chartFrom, chartTo]);
+
+  useEffect(() => {
+    if (stats) {
+      loadTopProducts(productsFrom, productsTo);
+    }
+  }, [productsFrom, productsTo]);
+
   const loadStats = async () => {
     try {
       const [statsData, weeklyData, hourlyData, topProductsData, vitrinaData] = await Promise.all([
         api.get<DashboardStats>('/dashboard/stats'),
-        api.get<Array<{ date: string; total: number }>>('/dashboard/weekly-chart'),
+        api.get<Array<{ date: string; total: number }>>(`/dashboard/weekly-chart?from=${chartFrom}&to=${chartTo}`),
         api.get<{ hourlyOrders: number[] }>('/dashboard/hourly'),
-        api.get<Array<{ name: string; count: number }>>('/dashboard/top-products'),
+        api.get<Array<{ name: string; count: number }>>(`/dashboard/top-products?from=${productsFrom}&to=${productsTo}`),
         api.get<VitrinaItem[]>('/products'),
       ]);
       setStats({
@@ -78,6 +101,24 @@ export default function AdminPage() {
     }
   };
 
+  const loadChart = async (from: string, to: string) => {
+    try {
+      const data = await api.get<Array<{ date: string; total: number }>>(`/dashboard/weekly-chart?from=${from}&to=${to}`);
+      setStats(prev => prev ? { ...prev, weeklySales: data } : null);
+    } catch (err: unknown) {
+      toast.error('Error cargando gráfico de ventas');
+    }
+  };
+
+  const loadTopProducts = async (from: string, to: string) => {
+    try {
+      const data = await api.get<Array<{ name: string; count: number }>>(`/dashboard/top-products?from=${from}&to=${to}`);
+      setStats(prev => prev ? { ...prev, topProducts: data } : null);
+    } catch (err: unknown) {
+      toast.error('Error cargando productos más vendidos');
+    }
+  };
+
   if (loading || !stats) {
     return (
       <div className="flex items-center justify-center h-96">
@@ -91,10 +132,24 @@ export default function AdminPage() {
     orders: count,
   })).filter((_, i) => i >= 6 && i <= 22);
 
-  const weeklyData = stats.weeklySales.map((d) => ({
-    date: new Date(d.date).toLocaleDateString('es-CO', { weekday: 'short' }),
-    total: d.total,
-  }));
+  const getChartData = () => {
+    const isLongRange = stats.weeklySales.length > 7;
+    return stats.weeklySales.map((d) => {
+      let dateLabel = '';
+      try {
+        const parsedDate = new Date(d.date + 'T12:00:00');
+        dateLabel = isLongRange
+          ? parsedDate.toLocaleDateString('es-CO', { day: 'numeric', month: 'short' })
+          : parsedDate.toLocaleDateString('es-CO', { weekday: 'short' });
+      } catch (e) {
+        dateLabel = d.date;
+      }
+      return {
+        date: dateLabel,
+        total: d.total,
+      };
+    });
+  };
 
   return (
     <div>
@@ -172,9 +227,26 @@ export default function AdminPage() {
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
         {/* Weekly Sales Chart */}
         <div className="bg-white dark:bg-gray-800 rounded-2xl p-5 shadow-sm border border-gray-100 dark:border-gray-700">
-          <h3 className="font-bold mb-4">Ventas de la Semana</h3>
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4">
+            <h3 className="font-bold">Ventas por Período</h3>
+            <div className="flex items-center gap-2 text-xs">
+              <input
+                type="date"
+                value={chartFrom}
+                onChange={(e) => setChartFrom(e.target.value)}
+                className="px-2 py-1 rounded-lg border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300"
+              />
+              <span className="text-gray-400">al</span>
+              <input
+                type="date"
+                value={chartTo}
+                onChange={(e) => setChartTo(e.target.value)}
+                className="px-2 py-1 rounded-lg border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300"
+              />
+            </div>
+          </div>
           <ResponsiveContainer width="100%" height={200}>
-            <BarChart data={weeklyData}>
+            <BarChart data={getChartData()}>
               <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
               <XAxis dataKey="date" fontSize={12} />
               <YAxis fontSize={12} tickFormatter={(v) => `${(v / 1000).toFixed(0)}k`} />
@@ -201,7 +273,24 @@ export default function AdminPage() {
 
       {/* Top Products */}
       <div className="bg-white dark:bg-gray-800 rounded-2xl p-5 shadow-sm border border-gray-100 dark:border-gray-700">
-        <h3 className="font-bold mb-4">Productos Mas Vendidos (Hoy)</h3>
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4">
+          <h3 className="font-bold">Productos Más Vendidos</h3>
+          <div className="flex items-center gap-2 text-xs">
+            <input
+              type="date"
+              value={productsFrom}
+              onChange={(e) => setProductsFrom(e.target.value)}
+              className="px-2 py-1 rounded-lg border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300"
+            />
+            <span className="text-gray-400">al</span>
+            <input
+              type="date"
+              value={productsTo}
+              onChange={(e) => setProductsTo(e.target.value)}
+              className="px-2 py-1 rounded-lg border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300"
+            />
+          </div>
+        </div>
         <div className="space-y-3">
           {stats.topProducts.map((product, i) => (
             <div key={i} className="flex items-center gap-3">
@@ -223,7 +312,7 @@ export default function AdminPage() {
             </div>
           ))}
           {stats.topProducts.length === 0 && (
-            <p className="text-center text-gray-400 py-4">No hay ventas hoy</p>
+            <p className="text-center text-gray-400 py-4">No hay ventas en este período</p>
           )}
         </div>
       </div>

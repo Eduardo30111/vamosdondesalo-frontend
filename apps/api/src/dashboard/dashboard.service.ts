@@ -6,10 +6,36 @@ export class DashboardService {
   constructor(private prisma: PrismaService) {}
 
   private getTodayRange() {
-    const start = new Date();
-    start.setHours(0, 0, 0, 0);
-    const end = new Date();
-    end.setHours(23, 59, 59, 999);
+    const now = new Date();
+    // Colombia timezone America/Bogota (UTC-5)
+    // Convert current UTC time to Colombia time
+    const colombiaTime = new Date(now.getTime() - 5 * 60 * 60 * 1000);
+    
+    // Start of the day in Colombia local time
+    const startColombia = new Date(colombiaTime);
+    startColombia.setUTCHours(0, 0, 0, 0);
+    
+    // End of the day in Colombia local time
+    const endColombia = new Date(colombiaTime);
+    endColombia.setUTCHours(23, 59, 59, 999);
+    
+    // Convert back to UTC for queries
+    const start = new Date(startColombia.getTime() + 5 * 60 * 60 * 1000);
+    const end = new Date(endColombia.getTime() + 5 * 60 * 60 * 1000);
+    
+    return { start, end };
+  }
+
+  private getRange(fromStr?: string, toStr?: string) {
+    if (!fromStr || !toStr) {
+      return this.getTodayRange();
+    }
+    const fromParts = fromStr.split('-');
+    const toParts = toStr.split('-');
+    const startColombia = new Date(Date.UTC(parseInt(fromParts[0]), parseInt(fromParts[1]) - 1, parseInt(fromParts[2]), 0, 0, 0, 0));
+    const endColombia = new Date(Date.UTC(parseInt(toParts[0]), parseInt(toParts[1]) - 1, parseInt(toParts[2]), 23, 59, 59, 999));
+    const start = new Date(startColombia.getTime() + 5 * 60 * 60 * 1000);
+    const end = new Date(endColombia.getTime() + 5 * 60 * 60 * 1000);
     return { start, end };
   }
 
@@ -26,9 +52,9 @@ export class DashboardService {
       expensesToday,
       wastesToday,
     ] = await Promise.all([
-      this.prisma.order.count({ where: { createdAt: { gte: start } } }),
+      this.prisma.order.count({ where: { createdAt: { gte: start, lte: end }, fulfillmentStatus: { not: 'CANCELLED' } } }),
       this.prisma.order.aggregate({
-        where: { createdAt: { gte: start }, paymentStatus: { in: ['PAID', 'FIADO'] } },
+        where: { createdAt: { gte: start, lte: end }, paymentStatus: { in: ['PAID', 'FIADO'] }, fulfillmentStatus: { not: 'CANCELLED' } },
         _sum: { total: true },
       }),
       this.prisma.order.count({ where: { fulfillmentStatus: { in: ['PENDING', 'PREPARING', 'READY', 'DELIVERED'] } } }),
@@ -37,18 +63,18 @@ export class DashboardService {
       this.prisma.orderItem.groupBy({
         by: ['productId'],
         _sum: { qty: true },
-        where: { order: { createdAt: { gte: start } } },
+        where: { order: { createdAt: { gte: start, lte: end }, fulfillmentStatus: { not: 'CANCELLED' } } },
         orderBy: { _sum: { qty: 'desc' } },
         take: 5,
       }),
       this.prisma.expense.aggregate({ where: { date: { gte: start, lte: end } }, _sum: { amount: true } }),
-      this.prisma.waste.findMany({ where: { createdAt: { gte: start } }, include: { product: { select: { costPrice: true } } } }),
+      this.prisma.waste.findMany({ where: { createdAt: { gte: start, lte: end } }, include: { product: { select: { costPrice: true } } } }),
     ]);
 
     const totalSales = salesTodayAgg._sum.total || 0;
 
     const orderItemsToday = await this.prisma.orderItem.findMany({
-      where: { order: { createdAt: { gte: start }, paymentStatus: { in: ['PAID', 'FIADO'] } } },
+      where: { order: { createdAt: { gte: start, lte: end }, paymentStatus: { in: ['PAID', 'FIADO'] }, fulfillmentStatus: { not: 'CANCELLED' } } },
       include: { product: { select: { costPrice: true, type: true } } },
     });
 
@@ -80,38 +106,65 @@ export class DashboardService {
     };
   }
 
-  async getWeeklyChart() {
-    const weekAgo = new Date();
-    weekAgo.setDate(weekAgo.getDate() - 7);
-    weekAgo.setHours(0, 0, 0, 0);
+  async getWeeklyChart(from?: string, to?: string) {
+    let start: Date;
+    let end: Date;
+    let fromColombia: Date;
+    let toColombia: Date;
 
-    const weeklySales = await this.prisma.order.findMany({
-      where: { createdAt: { gte: weekAgo }, paymentStatus: { in: ['PAID', 'FIADO'] } },
+    if (from && to) {
+      const r = this.getRange(from, to);
+      start = r.start;
+      end = r.end;
+      const fromParts = from.split('-');
+      const toParts = to.split('-');
+      fromColombia = new Date(Date.UTC(parseInt(fromParts[0]), parseInt(fromParts[1]) - 1, parseInt(fromParts[2]), 0, 0, 0, 0));
+      toColombia = new Date(Date.UTC(parseInt(toParts[0]), parseInt(toParts[1]) - 1, parseInt(toParts[2]), 0, 0, 0, 0));
+    } else {
+      const now = new Date();
+      const nowColombia = new Date(now.getTime() - 5 * 3600000);
+      const weekAgoColombia = new Date(nowColombia);
+      weekAgoColombia.setUTCDate(weekAgoColombia.getUTCDate() - 6);
+      weekAgoColombia.setUTCHours(0, 0, 0, 0);
+      start = new Date(weekAgoColombia.getTime() + 5 * 3600000);
+
+      const endColombia = new Date(nowColombia);
+      endColombia.setUTCHours(23, 59, 59, 999);
+      end = new Date(endColombia.getTime() + 5 * 3600000);
+
+      fromColombia = weekAgoColombia;
+      toColombia = new Date(nowColombia);
+      toColombia.setUTCHours(0, 0, 0, 0);
+    }
+
+    const sales = await this.prisma.order.findMany({
+      where: { createdAt: { gte: start, lte: end }, paymentStatus: { in: ['PAID', 'FIADO'] }, fulfillmentStatus: { not: 'CANCELLED' } },
       select: { total: true, createdAt: true },
     });
 
     const weeklyByDay: Record<string, number> = {};
-    for (let i = 6; i >= 0; i--) {
-      const d = new Date();
-      d.setDate(d.getDate() - i);
-      const key = d.toISOString().split('T')[0];
+    const loopDate = new Date(fromColombia);
+    while (loopDate.getTime() <= toColombia.getTime()) {
+      const key = loopDate.toISOString().split('T')[0];
       weeklyByDay[key] = 0;
+      loopDate.setUTCDate(loopDate.getUTCDate() + 1);
     }
 
-    weeklySales.forEach((order) => {
-      const key = order.createdAt.toISOString().split('T')[0];
+    sales.forEach((order) => {
+      const localDate = new Date(order.createdAt.getTime() - 5 * 3600000);
+      const key = localDate.toISOString().split('T')[0];
       if (weeklyByDay[key] !== undefined) weeklyByDay[key] += order.total;
     });
 
     return Object.entries(weeklyByDay).map(([date, total]) => ({ date, total }));
   }
 
-  async getTopProducts() {
-    const { start } = this.getTodayRange();
+  async getTopProducts(from?: string, to?: string) {
+    const { start, end } = this.getRange(from, to);
     const topProducts = await this.prisma.orderItem.groupBy({
       by: ['productId'],
       _sum: { qty: true },
-      where: { order: { createdAt: { gte: start } } },
+      where: { order: { createdAt: { gte: start, lte: end }, fulfillmentStatus: { not: 'CANCELLED' } } },
       orderBy: { _sum: { qty: 'desc' } },
       take: 10,
     });
@@ -127,15 +180,16 @@ export class DashboardService {
   }
 
   async getHourly() {
-    const { start } = this.getTodayRange();
+    const { start, end } = this.getTodayRange();
     const hourlyOrders = await this.prisma.order.findMany({
-      where: { createdAt: { gte: start } },
+      where: { createdAt: { gte: start, lte: end }, fulfillmentStatus: { not: 'CANCELLED' } },
       select: { createdAt: true, total: true },
     });
 
     const hourlyData: number[] = new Array(24).fill(0);
     hourlyOrders.forEach((order) => {
-      const hour = order.createdAt.getHours();
+      const localDate = new Date(order.createdAt.getTime() - 5 * 3600000);
+      const hour = localDate.getUTCHours();
       hourlyData[hour]++;
     });
 
@@ -149,9 +203,9 @@ export class DashboardService {
   }
 
   async getTopSellers() {
-    const { start } = this.getTodayRange();
+    const { start, end } = this.getTodayRange();
     const paidOrders = await this.prisma.order.findMany({
-      where: { createdAt: { gte: start }, paymentStatus: { in: ['PAID', 'FIADO'] } },
+      where: { createdAt: { gte: start, lte: end }, paymentStatus: { in: ['PAID', 'FIADO'] }, fulfillmentStatus: { not: 'CANCELLED' } },
       select: { total: true, customerName: true },
     });
 
