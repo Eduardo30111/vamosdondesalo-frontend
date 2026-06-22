@@ -40,7 +40,7 @@ export class ExpensesService {
         description: data.description,
         amount: data.amount,
         type: data.type as any,
-        date: data.date ? new Date(data.date) : new Date(),
+        date: data.date ? new Date(data.date.includes('T') ? data.date : data.date + 'T12:00:00Z') : new Date(),
         userId: data.userId,
       },
     });
@@ -48,7 +48,9 @@ export class ExpensesService {
 
   update(id: string, data: { category?: string; description?: string; amount?: number; type?: string; date?: string }) {
     const updateData: any = { ...data };
-    if (data.date) updateData.date = new Date(data.date);
+    if (data.date) {
+      updateData.date = new Date(data.date.includes('T') ? data.date : data.date + 'T12:00:00Z');
+    }
     if (data.type) updateData.type = data.type;
     return this.prisma.expense.update({ where: { id }, data: updateData });
   }
