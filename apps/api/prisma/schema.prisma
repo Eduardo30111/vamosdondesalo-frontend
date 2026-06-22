@@ -215,12 +215,13 @@ model Credit {
 }
 
 model Expense {
-  id       String   @id @default(dbgenerated("gen_random_uuid()"))
-  category String
-  amount   Float
-  type     String
-  date     DateTime @default(now())
-  userId   String?
+  id          String   @id @default(dbgenerated("gen_random_uuid()"))
+  category    String
+  description String?
+  amount      Float
+  type        String
+  date        DateTime @default(now())
+  userId      String?
 }
 
 model CashClose {

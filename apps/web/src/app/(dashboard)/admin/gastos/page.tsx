@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react';
 import { toast } from 'sonner';
 import { api } from '@/lib/api';
 import { formatCurrency, formatLocalDate, toLocalDateInputValue } from '@/lib/utils';
-import { Receipt, Plus, X, Pencil, Trash2 } from 'lucide-react';
+import { Receipt, Plus, X, Pencil, Trash2, ChevronDown, ChevronUp } from 'lucide-react';
 
 interface Expense {
   id: string;
@@ -23,6 +23,11 @@ export default function GastosPage() {
   const [editId, setEditId] = useState<string | null>(null);
   const [filter, setFilter] = useState<'ALL' | 'DAILY' | 'MONTHLY'>('ALL');
   const [form, setForm] = useState({ category: '', description: '', amount: '', type: 'DAILY', date: toLocalDateInputValue(new Date()) });
+  const [expandedDates, setExpandedDates] = useState<Record<string, boolean>>({});
+
+  const toggleDate = (dateKey: string) => {
+    setExpandedDates(prev => ({ ...prev, [dateKey]: !prev[dateKey] }));
+  };
 
   useEffect(() => {
     loadExpenses();
@@ -88,6 +93,16 @@ export default function GastosPage() {
   const totalDaily = expenses.filter(e => e.type === 'DAILY').reduce((sum, e) => sum + e.amount, 0);
   const totalMonthly = expenses.filter(e => e.type === 'MONTHLY').reduce((sum, e) => sum + e.amount, 0);
 
+  // Group by local date representation
+  const groups: Record<string, Expense[]> = {};
+  filtered.forEach(e => {
+    const key = toLocalDateInputValue(e.date);
+    if (!groups[key]) groups[key] = [];
+    groups[key].push(e);
+  });
+
+  const sortedDates = Object.keys(groups).sort((a, b) => b.localeCompare(a));
+
   if (loading) {
     return (
       <div className="flex items-center justify-center h-96">
@@ -137,51 +152,84 @@ export default function GastosPage() {
         ))}
       </div>
 
-      <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-sm border border-gray-100 dark:border-gray-700 overflow-x-auto">
-        <table className="w-full text-sm min-w-[650px]">
-          <thead className="bg-gray-50 dark:bg-gray-700">
-            <tr>
-              <th className="text-left p-3 font-medium">Categoría</th>
-              <th className="text-left p-3 font-medium">Descripción</th>
-              <th className="text-left p-3 font-medium">Tipo</th>
-              <th className="text-left p-3 font-medium">Monto</th>
-              <th className="text-left p-3 font-medium">Fecha</th>
-              <th className="text-left p-3 font-medium">Acciones</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-gray-100 dark:divide-gray-700">
-            {filtered.map((expense) => (
-              <tr key={expense.id}>
-                <td className="p-3 font-medium">{expense.category}</td>
-                <td className="p-3 text-gray-500">{expense.description}</td>
-                <td className="p-3">
-                  <span className={`px-2 py-1 rounded-lg text-xs font-medium ${
-                    expense.type === 'DAILY' ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300' : 'bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-300'
-                  }`}>
-                    {expense.type === 'DAILY' ? 'Diario' : 'Mensual'}
+      <div className="space-y-4">
+        {sortedDates.map((dateKey) => {
+          const dayExpenses = groups[dateKey];
+          const dayTotal = dayExpenses.reduce((sum, e) => sum + e.amount, 0);
+          const isExpanded = !!expandedDates[dateKey]; // default to collapsed
+          
+          return (
+            <div key={dateKey} className="bg-white dark:bg-gray-800 rounded-2xl border border-gray-100 dark:border-gray-700 overflow-hidden shadow-xs">
+              <button
+                onClick={() => toggleDate(dateKey)}
+                className="w-full px-5 py-4 flex items-center justify-between bg-gray-50/50 dark:bg-gray-750/10 hover:bg-gray-50 dark:hover:bg-gray-750/30 transition outline-none"
+              >
+                <div className="flex items-center gap-3">
+                  <span className="font-extrabold text-sm text-gray-850 dark:text-gray-200">
+                    {formatLocalDate(dateKey)}
                   </span>
-                </td>
-                <td className="p-3 font-bold text-red-500">{formatCurrency(expense.amount)}</td>
-                <td className="p-3 text-gray-500">{formatLocalDate(expense.date)}</td>
-                <td className="p-3">
-                  <div className="flex gap-1">
-                    <button onClick={() => handleEdit(expense)} className="p-1.5 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg">
-                      <Pencil size={14} />
-                    </button>
-                    <button onClick={() => handleDelete(expense.id)} className="p-1.5 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg text-red-500">
-                      <Trash2 size={14} />
-                    </button>
-                  </div>
-                </td>
-              </tr>
-            ))}
-            {filtered.length === 0 && (
-              <tr>
-                <td colSpan={6} className="p-8 text-center text-gray-400">No hay gastos registrados</td>
-              </tr>
-            )}
-          </tbody>
-        </table>
+                  <span className="text-[10px] text-gray-400 font-bold bg-gray-100 dark:bg-gray-700 px-2 py-0.5 rounded-md">
+                    {dayExpenses.length} {dayExpenses.length === 1 ? 'gasto' : 'gastos'}
+                  </span>
+                </div>
+                <div className="flex items-center gap-3">
+                  <span className="font-extrabold text-sm text-red-500">
+                    {formatCurrency(dayTotal)}
+                  </span>
+                  {isExpanded ? <ChevronUp size={16} className="text-gray-400" /> : <ChevronDown size={16} className="text-gray-400" />}
+                </div>
+              </button>
+
+              {isExpanded && (
+                <div className="overflow-x-auto border-t border-gray-100 dark:border-gray-700">
+                  <table className="w-full text-sm min-w-[600px]">
+                    <thead className="bg-gray-50/50 dark:bg-gray-700/30 text-[10px] text-gray-400 uppercase tracking-wider">
+                      <tr>
+                        <th className="text-left p-3 font-bold pl-5">Categoría</th>
+                        <th className="text-left p-3 font-bold">Descripción</th>
+                        <th className="text-left p-3 font-bold">Tipo</th>
+                        <th className="text-left p-3 font-bold">Monto</th>
+                        <th className="text-left p-3 font-bold pr-5">Acciones</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-100 dark:divide-gray-700 text-gray-700 dark:text-gray-300">
+                      {dayExpenses.map((expense) => (
+                        <tr key={expense.id} className="hover:bg-gray-50/20 dark:hover:bg-gray-750/10">
+                          <td className="p-3 pl-5 font-extrabold text-xs">{expense.category}</td>
+                          <td className="p-3 text-xs text-gray-500">{expense.description}</td>
+                          <td className="p-3">
+                            <span className={`px-2 py-0.5 rounded-md text-[9px] font-extrabold ${
+                              expense.type === 'DAILY' ? 'bg-blue-50 text-blue-750 dark:bg-blue-950/20 dark:text-blue-300' : 'bg-purple-50 text-purple-755 dark:bg-purple-950/20 dark:text-purple-300'
+                            }`}>
+                              {expense.type === 'DAILY' ? 'Diario' : 'Mensual'}
+                            </span>
+                          </td>
+                          <td className="p-3 font-black text-red-500 text-xs">{formatCurrency(expense.amount)}</td>
+                          <td className="p-3 pr-5">
+                            <div className="flex gap-1 justify-end">
+                              <button onClick={() => handleEdit(expense)} className="p-1 text-gray-400 hover:text-blue-500 hover:bg-blue-50 dark:hover:bg-blue-950/20 rounded-md transition">
+                                <Pencil size={13} />
+                              </button>
+                              <button onClick={() => handleDelete(expense.id)} className="p-1 text-gray-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-950/20 rounded-md transition">
+                                <Trash2 size={13} />
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          );
+        })}
+        
+        {sortedDates.length === 0 && (
+          <div className="bg-white dark:bg-gray-800 rounded-2xl border border-gray-150/40 dark:border-gray-700/50 p-8 text-center text-gray-400 text-xs shadow-xs">
+            No hay gastos registrados.
+          </div>
+        )}
       </div>
 
       {/* Form Modal */}
