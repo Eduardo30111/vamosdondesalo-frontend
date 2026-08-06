@@ -29,7 +29,11 @@ export class AllExceptionsFilter implements ExceptionFilter {
         message = res;
       } else if (typeof res === 'object' && res !== null) {
         const resObj = res as Record<string, any>;
-        message = resObj.message || resObj.error || exception.message;
+        if (Array.isArray(resObj.message)) {
+          message = resObj.message.join('. ');
+        } else {
+          message = resObj.message || resObj.error || exception.message;
+        }
       }
       errorType = 'HTTP_EXCEPTION';
     } else if (exception instanceof Prisma.PrismaClientKnownRequestError) {

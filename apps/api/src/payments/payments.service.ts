@@ -8,8 +8,15 @@ export class PaymentsService {
 
   async createPayment(data: { orderId: string; method: string; amount: number }) {
     const orderExists = await this.prisma.order.findUnique({ where: { id: data.orderId } });
-    if (orderExists && orderExists.paymentStatus === 'PAID') {
-      throw new BadRequestException('El pedido ya se encuentra cobrado');
+    if (!orderExists) {
+      throw new BadRequestException('El pedido no existe');
+    }
+
+    const existingPayments = await this.prisma.payment.findMany({ where: { orderId: data.orderId } });
+    const existingPaidSum = existingPayments.reduce((acc, p) => acc + p.amount, 0);
+
+    if (orderExists.paymentStatus === 'PAID' && existingPaidSum >= orderExists.total) {
+      throw new BadRequestException('El pedido ya se encuentra totalmente cobrado');
     }
 
     const payment = await this.prisma.payment.create({
@@ -20,17 +27,20 @@ export class PaymentsService {
       },
     });
 
-    // If the order exists, mark it as PAID and emit update
-    const order = await this.prisma.order.findUnique({ where: { id: data.orderId }, include: { items: { include: { product: true } }, table: true, deliveryZone: true } });
-    if (order) {
-      const updated = await this.prisma.order.update({
-        where: { id: data.orderId },
-        data: { paymentStatus: 'PAID', isFiated: false },
-        include: { items: { include: { product: true } }, table: true, deliveryZone: true },
-      });
-      // Emit realtime update for order
-      this.realtime.emitOrderStatusChanged(updated);
-    }
+    const newTotalPaid = existingPaidSum + data.amount;
+    const isFullyPaid = newTotalPaid >= orderExists.total;
+
+    // If fully paid, mark as PAID. If partial and was fiado, keep FIADO.
+    const isFiated = !isFullyPaid && (orderExists.isFiated || orderExists.paymentStatus === 'FIADO');
+    const paymentStatus = isFullyPaid ? 'PAID' : (isFiated ? 'FIADO' : 'UNPAID');
+
+    const updated = await this.prisma.order.update({
+      where: { id: data.orderId },
+      data: { paymentStatus: paymentStatus as any, isFiated },
+      include: { items: { include: { product: true } }, table: true, deliveryZone: true },
+    });
+    // Emit realtime update for order
+    this.realtime.emitOrderStatusChanged(updated);
 
     return payment;
   }

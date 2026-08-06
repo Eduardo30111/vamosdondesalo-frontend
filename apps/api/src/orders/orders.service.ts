@@ -401,8 +401,14 @@ export class OrdersService {
 
   async fiar(id: string, customerId: string) {
     const order = await this.prisma.order.findUnique({ where: { id } });
-    if (order && order.paymentStatus === 'FIADO') {
-      throw new BadRequestException('El pedido ya se encuentra cobrado o fiado');
+    if (!order) {
+      throw new BadRequestException('Pedido no encontrado');
+    }
+
+    const existingPayments = await this.prisma.payment.findMany({ where: { orderId: id } });
+    const paidSum = existingPayments.reduce((sum, p) => sum + p.amount, 0);
+    if (paidSum >= order.total) {
+      throw new BadRequestException('El pedido ya se encuentra totalmente cobrado');
     }
 
     const updated = await this.prisma.order.update({

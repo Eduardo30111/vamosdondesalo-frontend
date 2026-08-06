@@ -84,6 +84,16 @@ export default function POSPage() {
   const [existingCustomer, setExistingCustomer] = useState<{ id: string; name: string } | null>(null);
   const [fiadosCustomers, setFiadosCustomers] = useState<any[]>([]);
 
+  // Abono fields in Fiar Modal
+  const [fiarAbonoAmount, setFiarAbonoAmount] = useState('');
+  const [fiarAbonoMethod, setFiarAbonoMethod] = useState('CASH');
+
+  // Partial fiar fields inside Cobrar Modal
+  const [cobrarFiarCedula, setCobrarFiarCedula] = useState('');
+  const [cobrarFiarName, setCobrarFiarName] = useState('');
+  const [cobrarFiarPhone, setCobrarFiarPhone] = useState('');
+  const [cobrarExistingCustomer, setCobrarExistingCustomer] = useState<{ id: string; name: string } | null>(null);
+
   const [submitting, setSubmitting] = useState(false);
   const [receivedAmount, setReceivedAmount] = useState('');
 
@@ -472,28 +482,172 @@ export default function POSPage() {
     await handleCreateOrder();
   };
 
+  const handleCobrarFiarLookup = async () => {
+    if (!cobrarFiarCedula.trim()) {
+      toast.error('Ingresa la cédula');
+      return;
+    }
+    try {
+      const customer = await api.get<{ id: string; name: string; cedula: string } | null>(`/customers/cedula/${cobrarFiarCedula}`);
+      if (customer) {
+        setCobrarExistingCustomer(customer);
+        setCobrarFiarName(customer.name);
+        toast.success(`Cliente encontrado: ${customer.name}`);
+      } else {
+        setCobrarExistingCustomer(null);
+        setCobrarFiarName('');
+        toast.info('Cliente no registrado. Ingresa el nombre para crearlo.');
+      }
+    } catch {
+      setCobrarExistingCustomer(null);
+      setCobrarFiarName('');
+      toast.info('Cliente no registrado. Ingresa el nombre para crearlo.');
+    }
+  };
+
   const handlePayAndCreate = async () => {
     if (submitting) return;
     if (!selectedMethod) {
       toast.error('Selecciona un método de pago');
       return;
     }
+
+    const orderTotal = getTotal();
+    const paidNum = receivedAmount ? parseFloat(receivedAmount) : orderTotal;
+
+    if (isNaN(paidNum) || paidNum <= 0) {
+      toast.error('Ingresa un monto válido');
+      return;
+    }
+
+    const isPartial = paidNum < orderTotal;
+
+    // If partial payment, check customer info for fiar remainder
+    if (isPartial) {
+      if (!cobrarFiarCedula.trim()) {
+        toast.error('Ingresa o selecciona la cédula del cliente para fiar el saldo restante');
+        return;
+      }
+      if (!cobrarExistingCustomer && !cobrarFiarName.trim()) {
+        toast.error('Ingresa el nombre del cliente para fiar el saldo restante');
+        return;
+      }
+    }
+
+    // Validar stock para productos de VITRINA
+    for (const item of cart.items) {
+      const prod = products.find((p) => p.id === item.productId);
+      if (prod && prod.preparationMode === 'VITRINA') {
+        const stock = prod.vitrinaStock?.qty ?? 0;
+        if (item.qty > stock) {
+          toast.error(`No hay suficiente stock de "${prod.name}" en la vitrina (Disponible: ${stock})`);
+          return;
+        }
+      }
+    }
+
     setSubmitting(true);
     try {
-      const order = await handleCreateOrder(selectedMethod);
-      if (order && !order.id.startsWith('local-')) {
+      if (!isPartial) {
+        // FULL PAYMENT
+        const order = await handleCreateOrder(selectedMethod);
+        if (order && !order.id.startsWith('local-')) {
+          await api.post('/payments', {
+            orderId: order.id,
+            method: selectedMethod,
+            amount: order.total,
+          });
+          toast.success('Pago registrado');
+        }
+      } else {
+        // PARTIAL PAYMENT + FIAR REMAINDER
+        const resolvedCustomerName = cobrarExistingCustomer?.name || cobrarFiarName || cart.customerName || 'Cliente';
+        const orderData = {
+          type: cart.orderType,
+          tableId: cart.tableId,
+          customerName: resolvedCustomerName,
+          customerPhone: cart.orderType === 'DELIVERY' ? customerPhone : undefined,
+          customerAddress: cart.orderType === 'DELIVERY' ? customerAddress : undefined,
+          deliveryZoneId: cart.orderType === 'DELIVERY' ? selectedZone : undefined,
+          notes: cart.notes,
+          items: cart.items.map((i) => ({
+            productId: i.productId,
+            qty: i.qty,
+            notes: i.notes || undefined,
+            unitPrice: i.price,
+          })),
+        };
+
+        const customerData = {
+          cedula: cobrarFiarCedula,
+          name: cobrarFiarName || resolvedCustomerName,
+          phone: cobrarFiarPhone || undefined,
+        };
+
+        const remainder = orderTotal - paidNum;
+
+        if (!navigator.onLine) {
+          addToOfflineQueue({
+            type: 'FIADO',
+            orderData,
+            customerData,
+            paymentData: {
+              method: selectedMethod,
+              amount: paidNum,
+            },
+          });
+          setOfflineCount(getOfflineQueue().length);
+          toast.warning('Sin conexión. Pago parcial y fiado guardados en cola offline.');
+          setShowPayment(false);
+          resetCustomerAndDeliveryFields();
+          cart.clear();
+          return;
+        }
+
+        // 1. Create or find customer
+        const customer = await api.post<{ id: string; name: string }>('/customers', {
+          cedula: cobrarFiarCedula,
+          name: cobrarFiarName || resolvedCustomerName || undefined,
+          phone: cobrarFiarPhone || undefined,
+        });
+
+        // 2. Create order
+        const order = await api.post<{ id: string; total: number }>('/orders', {
+          ...orderData,
+          customerName: customer.name,
+        });
+
+        // 3. Register payment to caja with selected method
         await api.post('/payments', {
           orderId: order.id,
           method: selectedMethod,
-          amount: order.total,
+          amount: paidNum,
         });
-        toast.success('Pago registrado');
+
+        // 4. Charge remainder to customer's account
+        await api.post(`/customers/${customer.id}/charge`, {
+          amount: remainder,
+          orderId: order.id,
+          note: `Pedido fiado restante (Pagó ${formatCurrency(paidNum)} con ${selectedMethod})`,
+        });
+
+        // 5. Mark order as FIADO
+        await api.put(`/orders/${order.id}/fiar`, { customerId: customer.id });
+
+        toast.success(`Pago de ${formatCurrency(paidNum)} cargado a caja y ${formatCurrency(remainder)} fiado a ${customer.name}`);
+        setShowPayment(false);
+        resetCustomerAndDeliveryFields();
+        cart.clear();
       }
     } catch (err: unknown) {
       toast.error(err instanceof Error ? err.message : 'Error registrando pago');
     } finally {
       setSubmitting(false);
       setReceivedAmount('');
+      setCobrarFiarCedula('');
+      setCobrarFiarName('');
+      setCobrarFiarPhone('');
+      setCobrarExistingCustomer(null);
     }
   };
 
@@ -567,6 +721,13 @@ export default function POSPage() {
       return;
     }
 
+    const orderTotal = getTotal();
+    const abonoNum = fiarAbonoAmount ? parseFloat(fiarAbonoAmount) : 0;
+    if (abonoNum > orderTotal) {
+      toast.error('El abono no puede ser mayor al total del pedido');
+      return;
+    }
+
     const resolvedCustomerName = existingCustomer?.name || fiarName || cart.customerName || 'Cliente de Fiado';
 
     const orderData = {
@@ -591,6 +752,8 @@ export default function POSPage() {
       phone: fiarPhone || undefined,
     };
 
+    const remainder = Math.max(0, orderTotal - abonoNum);
+
     setSubmitting(true);
 
     if (!navigator.onLine) {
@@ -598,6 +761,10 @@ export default function POSPage() {
         type: 'FIADO',
         orderData,
         customerData,
+        paymentData: abonoNum > 0 ? {
+          method: fiarAbonoMethod,
+          amount: abonoNum,
+        } : undefined,
       });
       setOfflineCount(getOfflineQueue().length);
       toast.warning('Sin conexión. Fiado guardado localmente en la cola.');
@@ -609,30 +776,47 @@ export default function POSPage() {
     }
 
     try {
-      // Create or find customer
+      // 1. Create or find customer
       const customer = await api.post<{ id: string; name: string }>('/customers', {
         cedula: fiarCedula,
         name: fiarName || resolvedCustomerName || undefined,
         phone: fiarPhone || undefined,
       });
 
-      // Create the order
+      // 2. Create the order
       const order = await api.post<{ id: string; total: number }>('/orders', {
         ...orderData,
         customerName: customer.name,
       });
 
-      // Charge the customer
-      await api.post(`/customers/${customer.id}/charge`, {
-        amount: getTotal(),
-        orderId: order.id,
-        note: `Pedido fiado`,
-      });
+      // 3. If there is an abono, register payment in caja
+      if (abonoNum > 0) {
+        await api.post('/payments', {
+          orderId: order.id,
+          method: fiarAbonoMethod,
+          amount: abonoNum,
+        });
+      }
 
-      // Mark order as FIADO
+      // 4. Charge the customer the remaining amount
+      if (remainder > 0) {
+        await api.post(`/customers/${customer.id}/charge`, {
+          amount: remainder,
+          orderId: order.id,
+          note: abonoNum > 0 
+            ? `Pedido fiado restante (Abonó ${formatCurrency(abonoNum)} con ${fiarAbonoMethod})` 
+            : `Pedido fiado`,
+        });
+      }
+
+      // 5. Mark order as FIADO
       await api.put(`/orders/${order.id}/fiar`, { customerId: customer.id });
 
-      toast.success(`Fiado registrado para ${customer.name}`);
+      if (abonoNum > 0) {
+        toast.success(`Abono de ${formatCurrency(abonoNum)} registrado en caja y ${formatCurrency(remainder)} fiado para ${customer.name}`);
+      } else {
+        toast.success(`Fiado registrado para ${customer.name}`);
+      }
       setShowFiar(false);
       resetCustomerAndDeliveryFields();
       cart.clear();
@@ -642,6 +826,10 @@ export default function POSPage() {
           type: 'FIADO',
           orderData,
           customerData,
+          paymentData: abonoNum > 0 ? {
+            method: fiarAbonoMethod,
+            amount: abonoNum,
+          } : undefined,
         });
         setOfflineCount(getOfflineQueue().length);
         toast.warning('Error de red. Fiado guardado localmente para reintentar.');
@@ -653,6 +841,8 @@ export default function POSPage() {
       toast.error(err instanceof Error ? err.message : 'Error registrando fiado');
     } finally {
       setSubmitting(false);
+      setFiarAbonoAmount('');
+      setFiarAbonoMethod('CASH');
     }
   };
 
@@ -1297,15 +1487,93 @@ export default function POSPage() {
                     placeholder="¿Con cuánto paga el cliente?"
                     value={receivedAmount}
                     onChange={(e) => setReceivedAmount(e.target.value)}
-                    className="w-full px-4 py-2.5 rounded-xl border border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 text-lg font-semibold"
+                    className="w-full px-4 py-2.5 rounded-xl border border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 text-lg font-semibold outline-none focus:ring-2 focus:ring-green-400"
                   />
                 </div>
-                {parseFloat(receivedAmount) > 0 && (
+                {parseFloat(receivedAmount) >= getTotal() && (
                   <div className="p-3 bg-green-50 dark:bg-green-950/20 rounded-xl flex justify-between items-center">
                     <span className="text-sm font-medium text-green-700 dark:text-green-400">Cambio a devolver:</span>
                     <span className="text-lg font-bold text-green-700 dark:text-green-400">
-                      {formatCurrency(Math.max(0, (parseFloat(receivedAmount) || 0) - getTotal()))}
+                      {formatCurrency((parseFloat(receivedAmount) || 0) - getTotal())}
                     </span>
+                  </div>
+                )}
+                {parseFloat(receivedAmount) > 0 && parseFloat(receivedAmount) < getTotal() && (
+                  <div className="p-3.5 bg-purple-50 dark:bg-purple-950/20 border border-purple-200 dark:border-purple-850 rounded-xl space-y-2.5">
+                    <div className="flex justify-between items-center">
+                      <span className="text-xs font-bold text-purple-700 dark:text-purple-300">Pago Parcial Detectado</span>
+                      <span className="text-xs font-bold text-red-500">
+                        Faltan: {formatCurrency(getTotal() - parseFloat(receivedAmount))}
+                      </span>
+                    </div>
+                    <p className="text-[11px] text-gray-600 dark:text-gray-300 leading-tight">
+                      Se registrará <b>{formatCurrency(parseFloat(receivedAmount))}</b> a caja ({selectedMethod}) y se fiará el resto (<b>{formatCurrency(getTotal() - parseFloat(receivedAmount))}</b>) al cliente.
+                    </p>
+
+                    <div>
+                      <label className="block text-[11px] font-semibold text-gray-600 dark:text-gray-300 mb-1">
+                        Cliente a quien fiar el saldo:
+                      </label>
+                      <select
+                        value={cobrarExistingCustomer ? cobrarExistingCustomer.id : ''}
+                        onChange={(e) => {
+                          const val = e.target.value;
+                          if (val === '' || val === 'new') {
+                            setCobrarExistingCustomer(null);
+                            setCobrarFiarCedula('');
+                            setCobrarFiarName('');
+                            setCobrarFiarPhone('');
+                          } else {
+                            const selected = fiadosCustomers.find((c) => c.id === val);
+                            if (selected) {
+                              setCobrarExistingCustomer({ id: selected.id, name: selected.name });
+                              setCobrarFiarCedula(selected.cedula);
+                              setCobrarFiarName(selected.name);
+                              setCobrarFiarPhone(selected.phone || '');
+                            }
+                          }
+                        }}
+                        className="w-full px-3 py-2 rounded-lg border border-purple-200 dark:border-purple-800 bg-white dark:bg-gray-800 text-xs outline-none"
+                      >
+                        <option value="">-- Seleccionar cliente existente --</option>
+                        {fiadosCustomers.map((c) => (
+                          <option key={c.id} value={c.id}>
+                            {c.name} (CC: {c.cedula})
+                          </option>
+                        ))}
+                        <option value="new">+ Registrar Nuevo Cliente...</option>
+                      </select>
+                    </div>
+
+                    {!cobrarExistingCustomer && (
+                      <div className="space-y-2 pt-1">
+                        <div className="flex gap-2">
+                          <input
+                            type="text"
+                            placeholder="Cédula del cliente"
+                            value={cobrarFiarCedula}
+                            onChange={(e) => setCobrarFiarCedula(e.target.value)}
+                            className="flex-1 px-3 py-1.5 rounded-lg border border-purple-200 dark:border-purple-800 bg-white dark:bg-gray-800 text-xs outline-none"
+                          />
+                          <button
+                            type="button"
+                            onClick={handleCobrarFiarLookup}
+                            className="px-3 py-1.5 bg-purple-200 dark:bg-purple-800 text-purple-900 dark:text-purple-100 rounded-lg text-xs font-semibold hover:bg-purple-300"
+                          >
+                            Buscar
+                          </button>
+                        </div>
+                        {cobrarFiarCedula && (
+                          <input
+                            type="text"
+                            placeholder="Nombre del cliente"
+                            value={cobrarFiarName}
+                            onChange={(e) => setCobrarFiarName(e.target.value)}
+                            className="w-full px-3 py-1.5 rounded-lg border border-purple-200 dark:border-purple-800 bg-white dark:bg-gray-800 text-xs outline-none"
+                          />
+                        )}
+                      </div>
+                    )}
                   </div>
                 )}
               </div>
@@ -1313,7 +1581,13 @@ export default function POSPage() {
 
             <button
               onClick={handlePayAndCreate}
-              disabled={!selectedMethod || submitting}
+              disabled={
+                !selectedMethod ||
+                submitting ||
+                (parseFloat(receivedAmount) > 0 &&
+                  parseFloat(receivedAmount) < getTotal() &&
+                  (!cobrarFiarCedula || (!cobrarExistingCustomer && !cobrarFiarName)))
+              }
               className="w-full py-3 rounded-xl bg-green-600 text-white font-semibold hover:bg-green-700 transition disabled:opacity-50 flex items-center justify-center gap-2"
             >
               {submitting ? (
@@ -1321,6 +1595,8 @@ export default function POSPage() {
                   <span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></span>
                   Confirmando...
                 </>
+              ) : parseFloat(receivedAmount) > 0 && parseFloat(receivedAmount) < getTotal() ? (
+                `Cobrar ${formatCurrency(parseFloat(receivedAmount))} y Fiar ${formatCurrency(getTotal() - parseFloat(receivedAmount))}`
               ) : (
                 'Confirmar Pago y Crear Pedido'
               )}
@@ -1431,6 +1707,49 @@ export default function POSPage() {
                 </>
               )}
 
+              {/* Initial payment / Abono */}
+              <div className="p-3 bg-gray-50 dark:bg-gray-750 border border-gray-200 dark:border-gray-650 rounded-xl space-y-2">
+                <div className="flex justify-between items-center">
+                  <label className="text-xs font-bold text-gray-700 dark:text-gray-300">
+                    ¿Abona / paga algo ahora? (Opcional)
+                  </label>
+                  {parseFloat(fiarAbonoAmount) > 0 && (
+                    <span className="text-[11px] font-semibold text-green-600 dark:text-green-400">
+                      Entra a caja
+                    </span>
+                  )}
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  <input
+                    type="number"
+                    placeholder="Monto abonado ($)"
+                    value={fiarAbonoAmount}
+                    onChange={(e) => setFiarAbonoAmount(e.target.value)}
+                    className="px-3 py-2 rounded-lg border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-800 text-sm font-semibold outline-none focus:ring-2 focus:ring-purple-400"
+                  />
+                  <select
+                    value={fiarAbonoMethod}
+                    onChange={(e) => setFiarAbonoMethod(e.target.value)}
+                    disabled={!fiarAbonoAmount || parseFloat(fiarAbonoAmount) <= 0}
+                    className="px-3 py-2 rounded-lg border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-800 text-xs font-semibold outline-none focus:ring-2 focus:ring-purple-400 disabled:opacity-50"
+                  >
+                    {paymentMethods.map((pm) => (
+                      <option key={pm.method} value={pm.method}>
+                        {pm.method} {pm.key ? `(${pm.key})` : ''}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                {parseFloat(fiarAbonoAmount) > 0 && (
+                  <div className="flex justify-between items-center text-xs pt-1 border-t border-gray-200 dark:border-gray-700">
+                    <span className="text-gray-500">Saldo restante a fiar:</span>
+                    <span className="font-bold text-purple-600 dark:text-purple-400 text-sm">
+                      {formatCurrency(Math.max(0, getTotal() - (parseFloat(fiarAbonoAmount) || 0)))}
+                    </span>
+                  </div>
+                )}
+              </div>
+
               <button
                 onClick={handleFiar}
                 disabled={!fiarCedula || (!existingCustomer && !fiarName) || submitting}
@@ -1441,6 +1760,8 @@ export default function POSPage() {
                     <span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></span>
                     Confirmando...
                   </>
+                ) : parseFloat(fiarAbonoAmount) > 0 ? (
+                  `Confirmar Abono (${formatCurrency(parseFloat(fiarAbonoAmount))}) y Fiar Saldo`
                 ) : (
                   'Confirmar Fiado'
                 )}

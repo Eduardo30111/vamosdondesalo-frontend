@@ -91,7 +91,7 @@ export async function syncOfflineQueue(onProgress?: (msg: string) => void): Prom
           await api.post('/payments', {
             orderId: order.id,
             method: item.paymentData.method,
-            amount: order.total,
+            amount: item.paymentData.amount || order.total,
           });
         }
       } else if (item.type === 'FIADO') {
@@ -110,12 +110,30 @@ export async function syncOfflineQueue(onProgress?: (msg: string) => void): Prom
           customerName: customer.name,
         });
 
-        // 3. Cargar cuenta al cliente
-        await api.post(`/customers/${customer.id}/charge`, {
-          amount: order.total,
-          orderId: order.id,
-          note: `Pedido fiado (sincronizado)`,
-        });
+        // 3. Si hubo pago parcial / abono inicial, registrar pago a caja
+        if (item.paymentData && item.paymentData.amount > 0) {
+          await api.post('/payments', {
+            orderId: order.id,
+            method: item.paymentData.method,
+            amount: item.paymentData.amount,
+          });
+
+          const remainder = Math.max(0, order.total - item.paymentData.amount);
+          if (remainder > 0) {
+            await api.post(`/customers/${customer.id}/charge`, {
+              amount: remainder,
+              orderId: order.id,
+              note: `Pedido fiado restante (Pagó $${item.paymentData.amount} con ${item.paymentData.method})`,
+            });
+          }
+        } else {
+          // Cargar cuenta total al cliente
+          await api.post(`/customers/${customer.id}/charge`, {
+            amount: order.total,
+            orderId: order.id,
+            note: `Pedido fiado (sincronizado)`,
+          });
+        }
 
         // 4. Marcar pedido como FIADO
         await api.put(`/orders/${order.id}/fiar`, { customerId: customer.id });
