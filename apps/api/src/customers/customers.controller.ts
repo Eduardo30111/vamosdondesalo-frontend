@@ -66,8 +66,12 @@ export class CustomersController {
 
   @Post(':id/payment')
   @Roles('ADMIN', 'VENDEDOR')
-  payment(@Param('id') id: string, @Body() body: { amount: number; note?: string }) {
-    return this.service.payment(id, body.amount, body.note);
+  payment(@Param('id') id: string, @Body() body: { amount: number; note?: string; paymentMethod?: string }) {
+    let note = body.note;
+    if (body.paymentMethod) {
+      note = (note || 'Abono') + ` (${body.paymentMethod})`;
+    }
+    return this.service.payment(id, body.amount, note);
   }
 
   @Delete('credits/:creditId')

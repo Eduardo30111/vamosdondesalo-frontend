@@ -55,7 +55,24 @@ export class PaymentsService {
   }
 
   async getPaymentMethods() {
-    return this.prisma.paymentMethodConfig.findMany();
+    const methods = ['CASH', 'NEQUI', 'BANCOLOMBIA', 'DAVIPLATA', 'TRANSFER', 'BREB'];
+    const configs = await this.prisma.paymentMethodConfig.findMany();
+    const result: any[] = [];
+    for (const m of methods) {
+      let config = configs.find((c) => c.method === m);
+      if (!config) {
+        config = await this.prisma.paymentMethodConfig.create({
+          data: {
+            method: m,
+            enabled: false,
+            qrUrl: null,
+            key: null,
+          },
+        });
+      }
+      result.push(config);
+    }
+    return result;
   }
 
   async updatePaymentMethod(method: string, data: { qrUrl?: string; key?: string; enabled: boolean }) {
@@ -66,3 +83,4 @@ export class PaymentsService {
     });
   }
 }
+

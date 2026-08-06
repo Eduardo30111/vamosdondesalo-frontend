@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Put, Body, Param, UseGuards } from '@nestjs/common';
+import { Controller, Get, Post, Put, Delete, Body, Param, UseGuards } from '@nestjs/common';
 import { ProductionOrdersService } from './production-orders.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
@@ -37,5 +37,11 @@ export class ProductionOrdersController {
   @Roles('ADMIN', 'COCINA')
   complete(@Param('id') id: string) {
     return this.service.complete(id);
+  }
+
+  @Delete(':id')
+  @Roles('ADMIN', 'COCINA', 'VENDEDOR')
+  remove(@Param('id') id: string) {
+    return this.service.remove(id);
   }
 }

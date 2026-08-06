@@ -50,14 +50,16 @@ export class ProductionOrdersService {
       include: { product: true },
     });
 
+    const todayStr = this.prisma.getColombiaTodayStr();
     // Incrementar stock vitrina del producto
-    await this.prisma.vitrinaStock.updateMany({
+    await this.prisma.vitrinaStock.upsert({
       where: { productId: order.productId },
-      data: { qty: { increment: qty } },
+      create: { productId: order.productId, qty, lastStockDate: todayStr },
+      update: { qty: { increment: qty }, lastStockDate: todayStr },
     });
 
     this.realtime.server.emit('production:updated', updated);
-    this.realtime.server.emit('vitrina:updated', { productId: order.productId, qty: qty });
+    this.realtime.server.emit('vitrina:updated', { productId: order.productId, qty: qty, lastStockDate: todayStr });
     return updated;
   }
 
@@ -77,14 +79,24 @@ export class ProductionOrdersService {
     });
 
     if (remainingToAdd > 0) {
-      await this.prisma.vitrinaStock.updateMany({
+      const todayStr = this.prisma.getColombiaTodayStr();
+      await this.prisma.vitrinaStock.upsert({
         where: { productId: order.productId },
-        data: { qty: { increment: remainingToAdd } },
+        create: { productId: order.productId, qty: remainingToAdd, lastStockDate: todayStr },
+        update: { qty: { increment: remainingToAdd }, lastStockDate: todayStr },
       });
-      this.realtime.server.emit('vitrina:updated', { productId: order.productId, qty: remainingToAdd });
+      this.realtime.server.emit('vitrina:updated', { productId: order.productId, qty: remainingToAdd, lastStockDate: todayStr });
     }
 
     this.realtime.server.emit('production:updated', updated);
     return updated;
+  }
+
+  async remove(id: string) {
+    const deleted = await this.prisma.productionOrder.delete({
+      where: { id },
+    });
+    this.realtime.server.emit('production:updated', { id, deleted: true });
+    return deleted;
   }
 }

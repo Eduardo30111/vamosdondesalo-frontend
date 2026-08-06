@@ -79,7 +79,7 @@ export default function MesasPage() {
       </div>
 
       <form onSubmit={handleCreate} className="flex gap-2 mb-6">
-        <input type="number" placeholder="Número de mesa" value={newNumber} onChange={(e) => setNewNumber(e.target.value)} className="px-4 py-2 rounded-xl border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-800 text-sm w-48" required min="1" />
+        <input type="number" placeholder="Número de mesa" value={newNumber} onChange={(e) => setNewNumber(e.target.value)} className="px-4 py-2 rounded-xl border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-800 text-sm w-48" required min="0" />
         <button type="submit" className="px-4 py-2 bg-salo-orange text-white rounded-xl font-medium text-sm flex items-center gap-2 hover:bg-primary-700 transition"><Plus size={18} /> Agregar</button>
       </form>
 
@@ -87,7 +87,7 @@ export default function MesasPage() {
         {tables.map((t) => (
           <div key={t.id} className="bg-white dark:bg-gray-800 rounded-2xl p-5 shadow-sm border border-gray-100 dark:border-gray-700">
             <div className="flex items-center justify-between mb-3">
-              <h3 className="text-xl font-bold">Mesa {t.number}</h3>
+              <h3 className="text-xl font-bold">{t.number === 0 ? 'Recepción' : `Mesa ${t.number}`}</h3>
               <QrCode className="text-salo-orange" size={24} />
             </div>
 

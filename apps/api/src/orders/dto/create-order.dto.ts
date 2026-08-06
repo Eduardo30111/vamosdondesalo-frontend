@@ -12,6 +12,10 @@ class CreateOrderItemDto {
   @IsString()
   @IsOptional()
   notes?: string;
+
+  @IsNumber()
+  @IsOptional()
+  unitPrice?: number;
 }
 
 export class CreateOrderDto {

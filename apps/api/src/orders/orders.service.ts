@@ -71,7 +71,10 @@ export class OrdersService {
     // Solo pedidos PREPARADO que están en cocina
     return this.prisma.order
       .findMany({
-      where: { fulfillmentStatus: { in: ['PENDING', 'PREPARING', 'READY'] } },
+      where: {
+        fulfillmentStatus: { in: ['PENDING', 'PREPARING', 'READY'] },
+        items: { some: { isPrep: true } },
+      },
       include: {
         items: {
           where: { isPrep: true },
@@ -86,15 +89,63 @@ export class OrdersService {
   }
 
   async findDeliveries() {
+    const now = new Date();
+    const colombiaDate = new Date(now.getTime() - 5 * 60 * 60 * 1000);
+    const year = colombiaDate.getUTCFullYear();
+    const month = colombiaDate.getUTCMonth();
+    const day = colombiaDate.getUTCDate();
+    const start = new Date(Date.UTC(year, month, day, 5, 0, 0, 0));
+
     return this.prisma.order
       .findMany({
-      where: { type: 'DELIVERY', fulfillmentStatus: { in: ['PENDING', 'PREPARING', 'READY', 'IN_TRANSIT', 'DELIVERED'] } },
-      include: {
-        items: { include: { product: true } },
-        deliveryZone: true,
-      },
-      orderBy: { createdAt: 'asc' },
-    })
+        where: {
+          type: 'DELIVERY',
+          OR: [
+            { fulfillmentStatus: { in: ['PENDING', 'PREPARING', 'READY', 'IN_TRANSIT'] } },
+            {
+              fulfillmentStatus: 'DELIVERED',
+              createdAt: { gte: start },
+            },
+          ],
+        },
+        include: {
+          items: { include: { product: true } },
+          deliveryZone: true,
+        },
+        orderBy: { createdAt: 'asc' },
+      })
+      .then((orders) => orders.map(mapOrderLegacyStatus));
+  }
+
+  async findByDate(dateStr: string) {
+    const targetDate = dateStr ? new Date(dateStr) : new Date();
+    
+    // We parse targetDate using UTC values to avoid local server timezone offsets when parsing YYYY-MM-DD
+    const year = targetDate.getUTCFullYear();
+    const month = targetDate.getUTCMonth();
+    const day = targetDate.getUTCDate();
+    
+    // Colombia local day boundary (UTC-5)
+    // 00:00:00 Colombia is 05:00:00 UTC
+    // 23:59:59 Colombia is 04:59:59 UTC the next day
+    const start = new Date(Date.UTC(year, month, day, 5, 0, 0, 0));
+    const end = new Date(Date.UTC(year, month, day + 1, 4, 59, 59, 999));
+    
+    return this.prisma.order
+      .findMany({
+        where: {
+          createdAt: { gte: start, lte: end },
+          paymentStatus: { in: ['PAID', 'FIADO'] },
+          fulfillmentStatus: { not: 'CANCELLED' },
+        },
+        include: {
+          items: { include: { product: true } },
+          payments: true,
+          table: true,
+          deliveryZone: true,
+        },
+        orderBy: { createdAt: 'desc' },
+      })
       .then((orders) => orders.map(mapOrderLegacyStatus));
   }
 
@@ -113,6 +164,7 @@ export class OrdersService {
   }
 
   async create(dto: CreateOrderDto) {
+    await this.prisma.checkAndResetDailyStock();
     const products = await this.prisma.product.findMany({
       where: { id: { in: dto.items.map((i) => i.productId) } },
       include: { vitrinaStock: true, store: true },
@@ -141,7 +193,7 @@ export class OrdersService {
     const items = dto.items.map((item) => {
       const product = productMap.get(item.productId);
       if (!product) throw new BadRequestException(`Producto ${item.productId} no encontrado`);
-      const unitPrice = product.salePrice;
+      const unitPrice = item.unitPrice !== undefined ? item.unitPrice : product.salePrice;
       total += unitPrice * item.qty;
       return {
         productId: item.productId,
@@ -209,20 +261,7 @@ export class OrdersService {
     const initialPaymentStatus = 'UNPAID';
 
     const order = await this.prisma.$transaction(async (tx) => {
-      if (dto.storeId) {
-        const store = await tx.store.findUnique({ where: { id: dto.storeId } });
-        if (store) {
-          const isTrial = (Date.now() - store.createdAt.getTime()) < 30 * 24 * 60 * 60 * 1000;
-          const commission = isTrial ? 0 : itemsSubtotal * store.commissionRate;
-          if (commission > 0) {
-            await tx.store.update({
-              where: { id: dto.storeId },
-              data: { balance: { decrement: commission } },
-            });
-          }
-        }
-      }
-
+      // No commission charged
       return tx.order.create({
         data: {
           type: dto.type as any,
@@ -362,7 +401,7 @@ export class OrdersService {
 
   async fiar(id: string, customerId: string) {
     const order = await this.prisma.order.findUnique({ where: { id } });
-    if (order && (order.paymentStatus === 'PAID' || order.paymentStatus === 'FIADO')) {
+    if (order && order.paymentStatus === 'FIADO') {
       throw new BadRequestException('El pedido ya se encuentra cobrado o fiado');
     }
 
@@ -409,6 +448,20 @@ export class OrdersService {
   }
 
   async updateStatus(id: string, status: string) {
+    // Block delivery status advancement if prepared items are not ready from kitchen
+    if (status === 'IN_TRANSIT' || status === 'DELIVERED') {
+      const existingOrder = await this.prisma.order.findUnique({
+        where: { id },
+        include: { items: true },
+      });
+      if (existingOrder && existingOrder.type === 'DELIVERY') {
+        const hasPrepItems = existingOrder.items.some((item) => item.isPrep);
+        if (hasPrepItems && existingOrder.fulfillmentStatus !== 'READY' && existingOrder.fulfillmentStatus !== 'IN_TRANSIT' && existingOrder.fulfillmentStatus !== 'DELIVERED') {
+          throw new BadRequestException('No se puede avanzar el pedido. Hay productos preparados que aún no están listos en cocina.');
+        }
+      }
+    }
+
     const order = await this.prisma.order.update({
       where: { id },
       data: { fulfillmentStatus: status as any },
@@ -480,6 +533,7 @@ export class OrdersService {
         where: {
           storeId,
           fulfillmentStatus: { in: ['PENDING', 'PREPARING', 'READY'] },
+          items: { some: { isPrep: true } },
         },
         include: {
           items: {
@@ -664,5 +718,119 @@ export class OrdersService {
 
     this.realtime.server.emit('vitrina:updated', { orderId });
     return mapOrderLegacyStatus(updated);
+  }
+
+  async getCocinaDailySummary(monthStr?: string) {
+    const targetMonth = monthStr || new Date(Date.now() - 5 * 60 * 60 * 1000).toISOString().slice(0, 7);
+    const [year, month] = targetMonth.split('-').map(Number);
+    const start = new Date(Date.UTC(year, month - 1, 1, 0, 0, 0, 0) + 5 * 60 * 60 * 1000);
+    const end = new Date(Date.UTC(year, month, 1, 0, 0, 0, 0) + 5 * 60 * 60 * 1000 - 1);
+
+    const [productionOrders, preparedItems] = await Promise.all([
+      this.prisma.productionOrder.findMany({
+        where: { createdAt: { gte: start, lte: end } },
+        include: { product: true },
+      }),
+      this.prisma.orderItem.findMany({
+        where: {
+          isPrep: true,
+          order: {
+            createdAt: { gte: start, lte: end },
+            fulfillmentStatus: { notIn: ['PENDING', 'PREPARING', 'CANCELLED'] },
+          },
+        },
+        include: {
+          product: true,
+          order: {
+            select: { createdAt: true },
+          },
+        },
+      }),
+    ]);
+
+    const getColombiaDate = (date: Date) => {
+      const col = new Date(date.getTime() - 5 * 60 * 60 * 1000);
+      return `${col.getUTCFullYear()}-${String(col.getUTCMonth() + 1).padStart(2, '0')}-${String(col.getUTCDate()).padStart(2, '0')}`;
+    };
+
+    const dailyData: Record<string, { vitrina: Record<string, { name: string; qty: number }>; preparados: Record<string, { name: string; qty: number }> }> = {};
+
+    const ensureDate = (dateStr: string) => {
+      if (!dailyData[dateStr]) {
+        dailyData[dateStr] = { vitrina: {}, preparados: {} };
+      }
+    };
+
+    productionOrders.forEach((po) => {
+      const dateStr = getColombiaDate(po.createdAt);
+      ensureDate(dateStr);
+      const prodId = po.productId;
+      if (!dailyData[dateStr].vitrina[prodId]) {
+        dailyData[dateStr].vitrina[prodId] = { name: po.product.name, qty: 0 };
+      }
+      dailyData[dateStr].vitrina[prodId].qty += po.readyQty;
+    });
+
+    preparedItems.forEach((item) => {
+      const dateStr = getColombiaDate(item.order.createdAt);
+      ensureDate(dateStr);
+      const prodId = item.productId;
+      if (!dailyData[dateStr].preparados[prodId]) {
+        dailyData[dateStr].preparados[prodId] = { name: item.product.name, qty: 0 };
+      }
+      dailyData[dateStr].preparados[prodId].qty += item.qty;
+    });
+
+    return Object.entries(dailyData)
+      .map(([date, data]) => ({
+        date,
+        vitrina: Object.entries(data.vitrina).map(([productId, info]) => ({ productId, ...info })),
+        preparados: Object.entries(data.preparados).map(([productId, info]) => ({ productId, ...info })),
+      }))
+      .sort((a, b) => b.date.localeCompare(a.date));
+  }
+
+  async getDeliveriesDailySummary(monthStr?: string) {
+    const targetMonth = monthStr || new Date(Date.now() - 5 * 60 * 60 * 1000).toISOString().slice(0, 7);
+    const [year, month] = targetMonth.split('-').map(Number);
+    const start = new Date(Date.UTC(year, month - 1, 1, 0, 0, 0, 0) + 5 * 60 * 60 * 1000);
+    const end = new Date(Date.UTC(year, month, 1, 0, 0, 0, 0) + 5 * 60 * 60 * 1000 - 1);
+
+    const orders = await this.prisma.order.findMany({
+      where: {
+        type: 'DELIVERY',
+        fulfillmentStatus: 'DELIVERED',
+        createdAt: { gte: start, lte: end },
+      },
+      include: {
+        items: { include: { product: true } },
+        deliveryZone: true,
+      },
+    });
+
+    const getColombiaDate = (date: Date) => {
+      const col = new Date(date.getTime() - 5 * 60 * 60 * 1000);
+      return `${col.getUTCFullYear()}-${String(col.getUTCMonth() + 1).padStart(2, '0')}-${String(col.getUTCDate()).padStart(2, '0')}`;
+    };
+
+    const dailyData: Record<string, { totalOrders: number; totalSales: number; totalDeliveryFees: number; orders: any[] }> = {};
+
+    orders.forEach((order) => {
+      const dateStr = getColombiaDate(order.createdAt);
+      if (!dailyData[dateStr]) {
+        dailyData[dateStr] = { totalOrders: 0, totalSales: 0, totalDeliveryFees: 0, orders: [] };
+      }
+      dailyData[dateStr].totalOrders++;
+      dailyData[dateStr].totalSales += order.total;
+      dailyData[dateStr].totalDeliveryFees += order.deliveryFee;
+      dailyData[dateStr].orders.push(mapOrderLegacyStatus(order));
+    });
+
+    return Object.entries(dailyData)
+      .map(([date, data]) => ({
+        date,
+        ...data,
+      }))
+      .sort((a, b) => b.date.localeCompare(a.date));
   }
 }

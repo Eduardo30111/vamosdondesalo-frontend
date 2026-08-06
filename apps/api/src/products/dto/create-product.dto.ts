@@ -18,7 +18,8 @@ export class CreateProductDto {
 
   @IsNumber()
   @Min(0)
-  costPrice: number;
+  @IsOptional()
+  costPrice?: number;
 
   @IsEnum(['OWN', 'SUPPLIER'])
   type: string;

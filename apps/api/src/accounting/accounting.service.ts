@@ -6,10 +6,14 @@ export class AccountingService {
   constructor(private prisma: PrismaService) {}
 
   async getDailyReport(date: Date) {
-    const startOfDay = new Date(date);
-    startOfDay.setHours(0, 0, 0, 0);
-    const endOfDay = new Date(date);
-    endOfDay.setHours(23, 59, 59, 999);
+    const year = date.getUTCFullYear();
+    const month = date.getUTCMonth();
+    const day = date.getUTCDate();
+
+    const startOfDay = new Date(Date.UTC(year, month, day, 5, 0, 0, 0));
+    const endOfDay = new Date(Date.UTC(year, month, day + 1, 4, 59, 59, 999));
+    const startOfMonth = new Date(Date.UTC(year, month, 1, 0, 0, 0, 0));
+    const endOfMonth = new Date(Date.UTC(year, month + 1, 0, 23, 59, 59, 999));
 
     const [sales, payments, expenses, wastes, monthlyExpenses, credits] = await Promise.all([
       // Total sales (orders that are paid)
@@ -39,7 +43,7 @@ export class AccountingService {
       }),
       // Monthly expenses (prorated)
       this.prisma.expense.aggregate({
-        where: { type: 'MONTHLY' },
+        where: { type: 'MONTHLY', date: { gte: startOfMonth, lte: endOfMonth } },
         _sum: { amount: true },
       }),
       // Credits/Fiados of the day
@@ -70,15 +74,44 @@ export class AccountingService {
       .filter(c => c.type === 'PAYMENT')
       .reduce((sum, c) => sum + c.amount, 0);
 
-    // Expected cash = cash payments of the day + total abonos
+    const abonosEfectivo = credits
+      .filter(c => c.type === 'PAYMENT' && (!c.note || !c.note.includes('(Transferencia)')))
+      .reduce((sum, c) => sum + c.amount, 0);
+
+    const abonosTransferencia = credits
+      .filter(c => c.type === 'PAYMENT' && c.note && c.note.includes('(Transferencia)'))
+      .reduce((sum, c) => sum + c.amount, 0);
+
+    // Expected cash = cash payments of the day + cash abonos
     const cashPayments = payments.find(p => p.method === 'CASH');
-    const expectedCash = (cashPayments?._sum.amount || 0) + totalAbonos;
+    const expectedCash = (cashPayments?._sum.amount || 0) + abonosEfectivo;
+
+    const methodsList = Array.from(new Set([
+      ...payments.map(p => p.method),
+      'CASH',
+      'NEQUI',
+      'BANCOLOMBIA',
+      'DAVIPLATA',
+      'TRANSFER',
+      'BREB',
+    ]));
+
+    const salesByMethod = methodsList.map(method => {
+      const paymentSum = payments.find(p => p.method === method)?._sum.amount || 0;
+      let extra = 0;
+      if (method === 'CASH') {
+        extra = abonosEfectivo;
+      } else if (method === 'NEQUI') {
+        extra = abonosTransferencia;
+      }
+      return { method, amount: paymentSum + extra };
+    }).filter(item => item.amount > 0);
 
     return {
       date: startOfDay.toISOString(),
       totalSales,
       orderCount: sales._count,
-      salesByMethod: payments.map(p => ({ method: p.method, amount: p._sum.amount || 0 })),
+      salesByMethod,
       supplierCosts,
       wasteCost,
       dailyExpenses,
@@ -115,7 +148,7 @@ export class AccountingService {
         _sum: { amount: true },
       }),
       this.prisma.expense.aggregate({
-        where: { type: 'MONTHLY' },
+        where: { type: 'MONTHLY', date: { gte: startOfMonth, lte: endOfMonth } },
         _sum: { amount: true },
       }),
       this.prisma.waste.findMany({
@@ -148,17 +181,166 @@ export class AccountingService {
       .filter(c => c.type === 'PAYMENT')
       .reduce((sum, c) => sum + c.amount, 0);
 
+    const abonosEfectivo = creditsMonth
+      .filter(c => c.type === 'PAYMENT' && (!c.note || !c.note.includes('(Transferencia)')))
+      .reduce((sum, c) => sum + c.amount, 0);
+
+    const abonosTransferencia = creditsMonth
+      .filter(c => c.type === 'PAYMENT' && c.note && c.note.includes('(Transferencia)'))
+      .reduce((sum, c) => sum + c.amount, 0);
+
+    const methodsList = Array.from(new Set([
+      ...payments.map(p => p.method),
+      'CASH',
+      'NEQUI',
+      'BANCOLOMBIA',
+      'DAVIPLATA',
+      'TRANSFER',
+      'BREB',
+    ]));
+
+    const salesByMethod = methodsList.map(method => {
+      const paymentSum = payments.find(p => p.method === method)?._sum.amount || 0;
+      let extra = 0;
+      if (method === 'CASH') {
+        extra = abonosEfectivo;
+      } else if (method === 'NEQUI') {
+        extra = abonosTransferencia;
+      }
+      return { method, amount: paymentSum + extra };
+    }).filter(item => item.amount > 0);
+
     return {
       year,
       month,
       daysInMonth,
       totalSales,
       orderCount: sales._count,
-      salesByMethod: payments.map(p => ({ method: p.method, amount: p._sum.amount || 0 })),
+      salesByMethod,
       supplierCosts,
       wasteCost,
       totalDailyExpenses,
       totalMonthlyExpenses,
+      netProfit: Math.round(netProfit),
+      margin: Math.round(margin * 100) / 100,
+      totalFiado,
+      totalAbonos,
+    };
+  }
+
+  async getWeeklyReport(date: Date) {
+    const year = date.getUTCFullYear();
+    const month = date.getUTCMonth();
+    const day = date.getUTCDate();
+
+    const targetUTC = new Date(Date.UTC(year, month, day));
+    const startOfMonth = new Date(Date.UTC(year, month, 1, 0, 0, 0, 0));
+    const endOfMonth = new Date(Date.UTC(year, month + 1, 0, 23, 59, 59, 999));
+    const dayOfWeek = targetUTC.getUTCDay(); // 0 = Sunday, 1 = Monday, etc.
+    const diffToMonday = dayOfWeek === 0 ? -6 : 1 - dayOfWeek;
+
+    const monday = new Date(Date.UTC(year, month, day + diffToMonday));
+    const startOfWeek = new Date(Date.UTC(monday.getUTCFullYear(), monday.getUTCMonth(), monday.getUTCDate(), 5, 0, 0, 0));
+    const endOfWeek = new Date(Date.UTC(monday.getUTCFullYear(), monday.getUTCMonth(), monday.getUTCDate() + 6, 28, 59, 59, 999));
+
+    const [sales, payments, expenses, wastes, monthlyExpenses, credits] = await Promise.all([
+      this.prisma.order.aggregate({
+        where: {
+          createdAt: { gte: startOfWeek, lte: endOfWeek },
+          paymentStatus: { in: ['PAID', 'FIADO'] },
+          fulfillmentStatus: { not: 'CANCELLED' },
+        },
+        _sum: { total: true },
+        _count: true,
+      }),
+      this.prisma.payment.groupBy({
+        by: ['method'],
+        where: { createdAt: { gte: startOfWeek, lte: endOfWeek } },
+        _sum: { amount: true },
+      }),
+      this.prisma.expense.aggregate({
+        where: { date: { gte: startOfWeek, lte: endOfWeek }, type: 'DAILY' },
+        _sum: { amount: true },
+      }),
+      this.prisma.waste.findMany({
+        where: { createdAt: { gte: startOfWeek, lte: endOfWeek } },
+        include: { product: { select: { costPrice: true } } },
+      }),
+      this.prisma.expense.aggregate({
+        where: { type: 'MONTHLY', date: { gte: startOfMonth, lte: endOfMonth } },
+        _sum: { amount: true },
+      }),
+      this.prisma.credit.findMany({
+        where: { createdAt: { gte: startOfWeek, lte: endOfWeek } },
+      }),
+    ]);
+
+    const orderItems = await this.prisma.orderItem.findMany({
+      where: {
+        order: {
+          createdAt: { gte: startOfWeek, lte: endOfWeek },
+          paymentStatus: { in: ['PAID', 'FIADO'] },
+          fulfillmentStatus: { not: 'CANCELLED' },
+        },
+      },
+      include: { product: { select: { costPrice: true } } },
+    });
+
+    const totalSales = sales._sum.total || 0;
+    const supplierCosts = orderItems.reduce((sum, item) => sum + item.qty * item.product.costPrice, 0);
+    const wasteCost = wastes.reduce((sum, w) => sum + w.qty * w.product.costPrice, 0);
+    const dailyExpenses = expenses._sum.amount || 0;
+    const weeklyExpensesProrated = ((monthlyExpenses._sum.amount || 0) / 30) * 7;
+    const netProfit = totalSales - supplierCosts - wasteCost - dailyExpenses - weeklyExpensesProrated;
+    const margin = totalSales > 0 ? (netProfit / totalSales) * 100 : 0;
+
+    const totalFiado = credits
+      .filter(c => c.type === 'CHARGE')
+      .reduce((sum, c) => sum + c.amount, 0);
+
+    const totalAbonos = credits
+      .filter(c => c.type === 'PAYMENT')
+      .reduce((sum, c) => sum + c.amount, 0);
+
+    const abonosEfectivo = credits
+      .filter(c => c.type === 'PAYMENT' && (!c.note || !c.note.includes('(Transferencia)')))
+      .reduce((sum, c) => sum + c.amount, 0);
+
+    const abonosTransferencia = credits
+      .filter(c => c.type === 'PAYMENT' && c.note && c.note.includes('(Transferencia)'))
+      .reduce((sum, c) => sum + c.amount, 0);
+
+    const methodsList = Array.from(new Set([
+      ...payments.map(p => p.method),
+      'CASH',
+      'NEQUI',
+      'BANCOLOMBIA',
+      'DAVIPLATA',
+      'TRANSFER',
+      'BREB',
+    ]));
+
+    const salesByMethod = methodsList.map(method => {
+      const paymentSum = payments.find(p => p.method === method)?._sum.amount || 0;
+      let extra = 0;
+      if (method === 'CASH') {
+        extra = abonosEfectivo;
+      } else if (method === 'NEQUI') {
+        extra = abonosTransferencia;
+      }
+      return { method, amount: paymentSum + extra };
+    }).filter(item => item.amount > 0);
+
+    return {
+      startDate: startOfWeek.toISOString(),
+      endDate: endOfWeek.toISOString(),
+      totalSales,
+      orderCount: sales._count,
+      salesByMethod,
+      supplierCosts,
+      wasteCost,
+      dailyExpenses,
+      weeklyExpensesProrated: Math.round(weeklyExpensesProrated),
       netProfit: Math.round(netProfit),
       margin: Math.round(margin * 100) / 100,
       totalFiado,

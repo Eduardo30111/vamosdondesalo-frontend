@@ -3,6 +3,7 @@
 import { useEffect, useState, useCallback } from 'react';
 import Link from 'next/link';
 import { toast } from 'sonner';
+import { formatErrorMessage } from '@/lib/error-handler';
 
 import {
   MapPin,
@@ -78,6 +79,15 @@ interface AuthUser {
   role: string;
 }
 
+const METHOD_LABELS: Record<string, string> = {
+  CASH: 'Efectivo',
+  NEQUI: 'Nequi',
+  BANCOLOMBIA: 'Bancolombia',
+  DAVIPLATA: 'Daviplata',
+  TRANSFER: 'Transferencia',
+  BREB: 'Breb',
+};
+
 export default function LandingPage() {
   const [config, setConfig] = useState<AppConfig | null>(null);
   const [products, setProducts] = useState<Product[]>([]);
@@ -86,6 +96,8 @@ export default function LandingPage() {
   const [cart, setCart] = useState<CartItem[]>([]);
   const [showCart, setShowCart] = useState(false);
   const [showCheckout, setShowCheckout] = useState(false);
+  const [paymentMethods, setPaymentMethods] = useState<any[]>([{ method: 'CASH', enabled: true }]);
+  const [selectedPaymentMethod, setSelectedPaymentMethod] = useState<string>('CASH');
   const [customerData, setCustomerData] = useState({
     name: '',
     phone: '',
@@ -209,6 +221,21 @@ export default function LandingPage() {
       .catch((e) => {
         console.error('Error fetching delivery zones:', e);
         setDeliveryZones([]);
+      });
+
+    // Load payment methods
+    fetch(`${API_URL}/public/payment-methods`)
+      .then((r) => r.json())
+      .then((data) => {
+        if (Array.isArray(data)) {
+          setPaymentMethods(data);
+        } else {
+          setPaymentMethods([{ method: 'CASH', enabled: true }]);
+        }
+      })
+      .catch((e) => {
+        console.error('Error fetching payment methods:', e);
+        setPaymentMethods([{ method: 'CASH', enabled: true }]);
       });
     
     // Check if user is logged in
@@ -406,6 +433,7 @@ export default function LandingPage() {
           })),
           total: storeSubtotal + storeDeliveryFee,
           storeId: storeId === 'legacy-salo' ? undefined : storeId,
+          notes: `Método de pago: ${METHOD_LABELS[selectedPaymentMethod] || selectedPaymentMethod}`,
         };
 
         try {
@@ -414,7 +442,10 @@ export default function LandingPage() {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(payload),
           });
-          if (!res.ok) throw new Error(`Error en tienda ${group.store.name}`);
+          if (!res.ok) {
+            const errJson = await res.json().catch(() => ({}));
+            throw new Error(errJson.message || `Error en tienda ${group.store.name}`);
+          }
           const order = await res.json();
           
           // Construct WhatsApp URL
@@ -425,6 +456,7 @@ export default function LandingPage() {
             `*Cliente:* ${customerData.name}\n` +
             `*Teléfono:* ${customerData.phone}\n` +
             `*Dirección:* ${customerData.address}${customerData.nacional ? ' (Envío Nacional)' : ''}\n\n` +
+            `*Método de Pago:* ${METHOD_LABELS[selectedPaymentMethod] || selectedPaymentMethod}\n\n` +
             `*Productos:*\n` +
             group.items.map((it) => `- ${it.qty}x ${it.product.name} ($${it.product.salePrice.toLocaleString('es-CO')})`).join('\n') + `\n\n` +
             `*Subtotal:* $${storeSubtotal.toLocaleString('es-CO')}\n` +
@@ -442,7 +474,7 @@ export default function LandingPage() {
           });
         } catch (err) {
           console.error(err);
-          alert(`Hubo un problema registrando el pedido en la tienda ${group.store.name}. Intente de nuevo.`);
+          toast.error(formatErrorMessage(err, `Problema registrando el pedido en ${group.store.name}`));
           return;
         }
       }
@@ -1191,6 +1223,75 @@ export default function LandingPage() {
                     💡 Con tu número de identificación puedes rastrear tu pedido en tiempo real más tarde.
                   </p>
                 </div>
+
+                {/* Payment Method Selector */}
+                <div className="space-y-2">
+                  <label className="block text-xs font-extrabold uppercase text-gray-400 dark:text-gray-500 tracking-wider mb-1">
+                    Método de pago
+                  </label>
+                  <div className="grid grid-cols-2 gap-2.5">
+                    {paymentMethods.length > 0 ? (
+                      paymentMethods.map((m) => {
+                        const isSelected = selectedPaymentMethod === m.method;
+                        return (
+                          <button
+                            key={m.method}
+                            type="button"
+                            onClick={() => setSelectedPaymentMethod(m.method)}
+                            className={`p-3.5 rounded-2xl border text-left font-bold text-xs transition-all flex flex-col gap-0.5 relative overflow-hidden ${
+                              isSelected
+                                ? 'border-orange-500 bg-orange-500 text-white shadow-sm scale-[1.02]'
+                                : 'border-gray-200 dark:border-gray-750 bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-750'
+                            }`}
+                          >
+                            <span className="font-extrabold truncate">{METHOD_LABELS[m.method] || m.method}</span>
+                            {m.key && (
+                              <span className={`text-[9px] font-medium truncate ${isSelected ? 'text-orange-100' : 'text-gray-400'}`}>
+                                {m.key}
+                              </span>
+                            )}
+                          </button>
+                        );
+                      })
+                    ) : (
+                      <div className="col-span-2 p-3.5 rounded-2xl border border-gray-200 dark:border-gray-700 text-center text-xs text-gray-400">
+                        Cargando métodos de pago...
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {/* QR Display for Transfers / Nequi Alert */}
+                {selectedPaymentMethod !== 'CASH' && (
+                  <div className="bg-gray-50 dark:bg-gray-750 border border-gray-100 dark:border-gray-700/60 rounded-2xl p-4 flex flex-col items-center justify-center space-y-3">
+                    <p className="text-xs font-bold text-gray-500 text-center">
+                      Escanea el código QR para realizar la transferencia
+                    </p>
+                    {paymentMethods.find((m) => m.method === selectedPaymentMethod)?.qrUrl ? (
+                      <img
+                        src={paymentMethods.find((m) => m.method === selectedPaymentMethod)?.qrUrl || undefined}
+                        alt={`QR ${selectedPaymentMethod}`}
+                        className="w-44 h-44 object-contain rounded-xl border bg-white shadow-sm"
+                      />
+                    ) : (
+                      <div className="w-44 h-44 flex items-center justify-center rounded-xl border bg-white text-gray-400 text-xs text-center p-4">
+                        No hay imagen de QR configurada
+                      </div>
+                    )}
+                    {paymentMethods.find((m) => m.method === selectedPaymentMethod)?.key && (
+                      <p className="text-xs font-bold text-center text-gray-700 dark:text-gray-300">
+                        Número / Referencia: {paymentMethods.find((m) => m.method === selectedPaymentMethod)?.key}
+                      </p>
+                    )}
+                    {selectedPaymentMethod === 'NEQUI' && (
+                      <div className="p-3 bg-purple-50 dark:bg-purple-950/20 border border-purple-150/40 dark:border-purple-900/20 rounded-xl text-center w-full">
+                        <span className="text-xs font-bold text-purple-700 dark:text-purple-400">
+                          📢 Muéstrale al vendedor el comprobante para que te dé el producto
+                        </span>
+                      </div>
+                    )}
+                  </div>
+                )}
 
                 <div className="flex items-center gap-2.5 py-1">
                   <input

@@ -36,7 +36,7 @@ interface Product {
 interface Store {
   id: string;
   name: string;
-  plan: 'FREE' | 'PRO';
+  plan: 'FREE' | 'PRO' | 'PREMIUM';
   products: Product[];
 }
 
@@ -150,6 +150,17 @@ export default function MerchantProductsPage() {
     }
   };
 
+  const handleDelete = async (prod: Product) => {
+    if (!confirm(`¿Eliminar el producto "${prod.name}" de forma permanente?`)) return;
+    try {
+      await api.delete(`/products/${prod.id}`);
+      toast.success('Producto eliminado con éxito');
+      loadStore();
+    } catch (err: any) {
+      toast.error(err.message || 'Error al eliminar el producto');
+    }
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!formData.name || formData.salePrice <= 0) {
@@ -253,7 +264,7 @@ export default function MerchantProductsPage() {
           </h2>
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
             {activeProducts.map((p) => (
-              <ProductCard key={p.id} product={p} onEdit={handleOpenEdit} onToggle={handleToggleActive} />
+              <ProductCard key={p.id} product={p} onEdit={handleOpenEdit} onToggle={handleToggleActive} onDelete={handleDelete} />
             ))}
             {activeProducts.length === 0 && (
               <p className="text-sm text-gray-400 py-6 border border-dashed border-gray-200 dark:border-gray-700 rounded-3xl text-center w-full col-span-full">
@@ -270,7 +281,7 @@ export default function MerchantProductsPage() {
           </h2>
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
             {inactiveProducts.map((p) => (
-              <ProductCard key={p.id} product={p} onEdit={handleOpenEdit} onToggle={handleToggleActive} />
+              <ProductCard key={p.id} product={p} onEdit={handleOpenEdit} onToggle={handleToggleActive} onDelete={handleDelete} />
             ))}
             {inactiveProducts.length === 0 && (
               <p className="text-sm text-gray-400 py-6 border border-dashed border-gray-200 dark:border-gray-700 rounded-3xl text-center w-full col-span-full">
@@ -345,6 +356,7 @@ export default function MerchantProductsPage() {
                     placeholder={formData.saleType === 'UNIT' && variants.length > 0 ? 'Definido en variantes' : 'Ej: 3000'}
                     value={(formData.saleType === 'UNIT' && variants.length > 0) ? '' : (formData.salePrice || '')}
                     onChange={(e) => setFormData({ ...formData, salePrice: Number(e.target.value) })}
+                    onFocus={(e) => e.target.select()}
                     className="w-full px-4 py-3 rounded-xl border border-gray-200 dark:border-gray-750 bg-gray-50 dark:bg-gray-750 text-sm outline-none focus:ring-2 focus:ring-orange-400 disabled:opacity-50 transition"
                   />
                 </div>
@@ -356,6 +368,7 @@ export default function MerchantProductsPage() {
                     placeholder="Ej: 1500"
                     value={formData.costPrice || ''}
                     onChange={(e) => setFormData({ ...formData, costPrice: Number(e.target.value) })}
+                    onFocus={(e) => e.target.select()}
                     className="w-full px-4 py-3 rounded-xl border border-gray-200 dark:border-gray-750 bg-gray-50 dark:bg-gray-750 text-sm outline-none focus:ring-2 focus:ring-orange-400 transition"
                   />
                 </div>
@@ -410,6 +423,7 @@ export default function MerchantProductsPage() {
                               newVariants[index].price = Number(e.target.value);
                               setVariants(newVariants);
                             }}
+                            onFocus={(e) => e.target.select()}
                             className="w-28 px-3 py-2 rounded-xl border border-gray-200 dark:border-gray-750 bg-white dark:bg-gray-700 text-sm outline-none focus:ring-2 focus:ring-orange-400 transition"
                           />
                           {variants.length > 1 && (
@@ -435,8 +449,8 @@ export default function MerchantProductsPage() {
                 </div>
               )}
 
-              {store?.plan === 'PRO' && (
-                <div className="grid grid-cols-2 gap-4 border-t border-gray-100 dark:border-gray-750 pt-3">
+              {(store?.plan === 'PRO' || store?.plan === 'PREMIUM') && (
+                <div className="border-t border-gray-100 dark:border-gray-750 pt-3">
                   <div>
                     <label className="block text-xs font-extrabold uppercase text-gray-400 tracking-wider mb-1">Modo de Preparación</label>
                     <select
@@ -447,18 +461,6 @@ export default function MerchantProductsPage() {
                       <option value="VITRINA">Stock Físico / Vitrina</option>
                       <option value="PREPARADO">Cocina / Preparación</option>
                     </select>
-                  </div>
-                  <div>
-                    <label className="block text-xs font-extrabold uppercase text-gray-400 tracking-wider mb-1">Stock Diario (Vitrina)</label>
-                    <input
-                      type="number"
-                      min={0}
-                      disabled={formData.preparationMode === 'PREPARADO'}
-                      placeholder="Ej: 20"
-                      value={formData.dailyStock || ''}
-                      onChange={(e) => setFormData({ ...formData, dailyStock: Number(e.target.value) })}
-                      className="w-full px-4 py-3 rounded-xl border border-gray-200 dark:border-gray-750 bg-gray-50 dark:bg-gray-750 text-sm outline-none focus:ring-2 focus:ring-orange-400 disabled:opacity-50 transition"
-                    />
                   </div>
                 </div>
               )}
@@ -526,11 +528,13 @@ export default function MerchantProductsPage() {
 function ProductCard({
   product,
   onEdit,
-  onToggle
+  onToggle,
+  onDelete
 }: {
   product: Product;
   onEdit: (p: Product) => void;
   onToggle: (p: Product) => void;
+  onDelete: (p: Product) => void;
 }) {
   let priceDisplay = formatCurrency(product.salePrice);
   let badgeText = '';
@@ -587,8 +591,16 @@ function ProductCard({
           <button
             onClick={() => onEdit(product)}
             className="p-2 text-gray-500 hover:text-orange-500 hover:bg-orange-50 dark:hover:bg-orange-950/20 rounded-xl transition"
+            title="Editar"
           >
             <Edit2 size={16} />
+          </button>
+          <button
+            onClick={() => onDelete(product)}
+            className="p-2 text-red-500 hover:text-red-650 hover:bg-red-50 dark:hover:bg-red-950/20 rounded-xl transition"
+            title="Eliminar"
+          >
+            <Trash2 size={16} />
           </button>
           <button
             onClick={() => onToggle(product)}

@@ -6,6 +6,7 @@ import { toast } from 'sonner';
 
 import { Plus, Minus, Trash2, ShoppingCart, Bike, CreditCard, ArrowRight } from 'lucide-react';
 import { formatCurrency } from '@/lib/utils';
+import { formatErrorMessage } from '@/lib/error-handler';
 
 interface Product {
   id: string;
@@ -148,7 +149,7 @@ export default function DomicilioPage() {
       toast.success(`Pedido creado! Código: ${order.trackingCode}`);
       router.push(`/seguir-pedido?code=${order.trackingCode}`);
     } catch (err: unknown) {
-      toast.error(err instanceof Error ? err.message : 'Error');
+      toast.error(formatErrorMessage(err, 'No se pudo crear el pedido a domicilio'));
     }
   };
 

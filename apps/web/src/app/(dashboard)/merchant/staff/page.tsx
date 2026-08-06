@@ -27,7 +27,7 @@ interface StaffUser {
 interface Store {
   id: string;
   name: string;
-  plan: 'FREE' | 'PRO';
+  plan: 'FREE' | 'PRO' | 'PREMIUM';
 }
 
 export default function MerchantStaffPage() {
@@ -159,7 +159,7 @@ export default function MerchantStaffPage() {
           <ul className="space-y-2.5 text-xs text-gray-650 dark:text-gray-400 font-semibold">
             <li className="flex items-center gap-2"><Check size={14} className="text-green-500" /> Cuentas ilimitadas para Vendedores y Cocina.</li>
             <li className="flex items-center gap-2"><Check size={14} className="text-green-500" /> Visualización de pedidos en modo Cocina / Preparación.</li>
-            <li className="flex items-center gap-2"><Check size={14} className="text-green-500" /> Tasa de comisión reducida al 4% por venta.</li>
+            <li className="flex items-center gap-2"><Check size={14} className="text-green-500" /> Estadísticas y gráficos de ventas interactivos.</li>
             <li className="flex items-center gap-2"><Check size={14} className="text-green-500" /> Carga de catálogo de productos ilimitado.</li>
           </ul>
         </div>

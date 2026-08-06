@@ -67,7 +67,7 @@ export class TablesController {
         <html>
           <head><style>body{text-align:center;font-family:sans-serif;padding:40px;}</style></head>
           <body>
-            <h1>Mesa ${table.number}</h1>
+            <h1>${table.number === 0 ? 'Recepción' : `Mesa ${table.number}`}</h1>
             <h2>Donde Salo!</h2>
             <img src="${await QRCode.toDataURL(url)}" width="300" height="300" />
             <p>Escanea para ordenar</p>
@@ -76,14 +76,14 @@ export class TablesController {
         </html>
       `;
       res.setHeader('Content-Type', 'text/html');
-      res.setHeader('Content-Disposition', `attachment; filename="mesa-${table.number}.pdf"`);
+      res.setHeader('Content-Disposition', `attachment; filename="${table.number === 0 ? 'recepcion' : `mesa-${table.number}`}.pdf"`);
       res.send(html);
       return;
     }
 
     const pngBuffer = await QRCode.toBuffer(url, { type: 'png', width: 400, margin: 2 });
     res.setHeader('Content-Type', 'image/png');
-    res.setHeader('Content-Disposition', `attachment; filename="mesa-${table.number}.png"`);
+    res.setHeader('Content-Disposition', `attachment; filename="${table.number === 0 ? 'recepcion' : `mesa-${table.number}`}.png"`);
     res.send(pngBuffer);
   }
 }

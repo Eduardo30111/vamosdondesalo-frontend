@@ -19,6 +19,8 @@ import {
   ShoppingBag,
   Factory,
   Pencil,
+  User,
+  Users,
 } from 'lucide-react';
 
 
@@ -32,7 +34,11 @@ interface Product {
   preparationMode: string;
   saleType: string;
   prices: string | null;
-  vitrinaStock: { qty: number } | null;
+  vitrinaStock: { qty: number; lastStockDate?: string | null } | null;
+  addedToday?: boolean;
+  isAgotado?: boolean;
+  authorizedToday?: boolean;
+  preparedAuthorizations?: Array<{ date: string }>;
 }
 
 interface Table {
@@ -199,6 +205,12 @@ export default function POSPage() {
   const handleProductSelect = (product: Product) => {
     const remaining = product.vitrinaStock?.qty ?? 0;
     const isVitrina = product.preparationMode === 'VITRINA';
+
+    if (isVitrina && remaining <= 0) {
+      toast.error(`"${product.name}" está agotado en vitrina. Solicita más producción a cocina.`);
+      return;
+    }
+
     const existing = cart.items.find((i) => i.productId === product.id);
     const currentQty = existing ? existing.qty : 0;
     if (isVitrina && currentQty >= remaining) {
@@ -320,15 +332,16 @@ export default function POSPage() {
         }
       }
     }
-    if (!cart.customerName.trim()) {
-      toast.error('Ingresa el nombre del cliente');
+    const customerNameResolved = cart.customerName.trim() || existingCustomer?.name || '';
+    if (!customerNameResolved) {
+      toast.error('Ingresa o selecciona el nombre del cliente');
       return null;
     }
     if (cart.orderType === 'TABLE' && !cart.tableId) {
       toast.error('Selecciona una mesa');
       return null;
     }
-    if (cart.orderType === 'DELIVERY' && (!cart.customerName || !customerPhone || !customerAddress || !selectedZone)) {
+    if (cart.orderType === 'DELIVERY' && (!customerNameResolved || !customerPhone || !customerAddress || !selectedZone)) {
       toast.error('Completa los campos de domicilio');
       return null;
     }
@@ -336,7 +349,7 @@ export default function POSPage() {
     const orderData = {
       type: cart.orderType,
       tableId: cart.tableId,
-      customerName: cart.customerName,
+      customerName: customerNameResolved,
       customerPhone: cart.orderType === 'DELIVERY' ? customerPhone : undefined,
       customerAddress: cart.orderType === 'DELIVERY' ? customerAddress : undefined,
       deliveryZoneId: cart.orderType === 'DELIVERY' ? selectedZone : undefined,
@@ -345,6 +358,7 @@ export default function POSPage() {
         productId: item.productId,
         qty: item.qty,
         notes: item.notes || undefined,
+        unitPrice: item.price,
       })),
     };
 
@@ -389,7 +403,7 @@ export default function POSPage() {
       setOfflineCount(getOfflineQueue().length);
       toast.warning('Sin conexión. Pedido guardado localmente en cola.');
       setShowPayment(false);
-      resetDeliveryFields();
+      resetCustomerAndDeliveryFields();
       cart.clear();
       setSubmitting(false);
       return { id: tempId, total };
@@ -399,7 +413,7 @@ export default function POSPage() {
       const order = await api.post<{ id: string; total: number }>('/orders', orderData);
       toast.success('Pedido creado exitosamente!');
       setShowPayment(false);
-      resetDeliveryFields();
+      resetCustomerAndDeliveryFields();
       cart.clear();
       return order;
     } catch (err: unknown) {
@@ -483,6 +497,26 @@ export default function POSPage() {
     }
   };
 
+  const handleOpenFiarModal = () => {
+    // If cart has a customerName, try to match it with existing fiadosCustomers
+    if (cart.customerName && !existingCustomer) {
+      const match = fiadosCustomers.find(
+        (c) =>
+          c.name.toLowerCase().trim() === cart.customerName.toLowerCase().trim() ||
+          c.cedula.trim() === cart.customerName.trim()
+      );
+      if (match) {
+        setExistingCustomer({ id: match.id, name: match.name });
+        setFiarCedula(match.cedula);
+        setFiarName(match.name);
+        setFiarPhone(match.phone || '');
+      } else {
+        setFiarName(cart.customerName);
+      }
+    }
+    setShowFiar(true);
+  };
+
   const handleFiarLookup = async () => {
     if (!fiarCedula.trim()) {
       toast.error('Ingresa la cédula');
@@ -493,13 +527,17 @@ export default function POSPage() {
       if (customer) {
         setExistingCustomer(customer);
         setFiarName(customer.name);
+        cart.setCustomerName(customer.name);
+        toast.success(`Cliente encontrado: ${customer.name}`);
       } else {
         setExistingCustomer(null);
         setFiarName('');
+        toast.info('Cliente no encontrado. Ingresa su nombre para registrarlo.');
       }
     } catch {
       setExistingCustomer(null);
       setFiarName('');
+      toast.info('Cliente no encontrado. Ingresa su nombre para registrarlo.');
     }
   };
 
@@ -521,7 +559,7 @@ export default function POSPage() {
       }
     }
     if (!fiarCedula.trim()) {
-      toast.error('Ingresa la cédula del cliente');
+      toast.error('Ingresa o selecciona la cédula del cliente');
       return;
     }
     if (!existingCustomer && !fiarName.trim()) {
@@ -529,10 +567,12 @@ export default function POSPage() {
       return;
     }
 
+    const resolvedCustomerName = existingCustomer?.name || fiarName || cart.customerName || 'Cliente de Fiado';
+
     const orderData = {
       type: cart.orderType,
       tableId: cart.tableId,
-      customerName: fiarName || existingCustomer?.name || 'Cliente de Fiado',
+      customerName: resolvedCustomerName,
       customerPhone: cart.orderType === 'DELIVERY' ? customerPhone : undefined,
       customerAddress: cart.orderType === 'DELIVERY' ? customerAddress : undefined,
       deliveryZoneId: cart.orderType === 'DELIVERY' ? selectedZone : undefined,
@@ -541,12 +581,13 @@ export default function POSPage() {
         productId: i.productId,
         qty: i.qty,
         notes: i.notes || undefined,
+        unitPrice: i.price,
       })),
     };
 
     const customerData = {
       cedula: fiarCedula,
-      name: fiarName || undefined,
+      name: fiarName || resolvedCustomerName,
       phone: fiarPhone || undefined,
     };
 
@@ -561,11 +602,7 @@ export default function POSPage() {
       setOfflineCount(getOfflineQueue().length);
       toast.warning('Sin conexión. Fiado guardado localmente en la cola.');
       setShowFiar(false);
-      setFiarCedula('');
-      setFiarName('');
-      setFiarPhone('');
-      setExistingCustomer(null);
-      resetDeliveryFields();
+      resetCustomerAndDeliveryFields();
       cart.clear();
       setSubmitting(false);
       return;
@@ -575,7 +612,7 @@ export default function POSPage() {
       // Create or find customer
       const customer = await api.post<{ id: string; name: string }>('/customers', {
         cedula: fiarCedula,
-        name: fiarName || undefined,
+        name: fiarName || resolvedCustomerName || undefined,
         phone: fiarPhone || undefined,
       });
 
@@ -597,11 +634,7 @@ export default function POSPage() {
 
       toast.success(`Fiado registrado para ${customer.name}`);
       setShowFiar(false);
-      setFiarCedula('');
-      setFiarName('');
-      setFiarPhone('');
-      setExistingCustomer(null);
-      resetDeliveryFields();
+      resetCustomerAndDeliveryFields();
       cart.clear();
     } catch (err: unknown) {
       if (err instanceof Error && isNetworkError(err)) {
@@ -613,11 +646,7 @@ export default function POSPage() {
         setOfflineCount(getOfflineQueue().length);
         toast.warning('Error de red. Fiado guardado localmente para reintentar.');
         setShowFiar(false);
-        setFiarCedula('');
-        setFiarName('');
-        setFiarPhone('');
-        setExistingCustomer(null);
-        resetDeliveryFields();
+        resetCustomerAndDeliveryFields();
         cart.clear();
         return;
       }
@@ -631,6 +660,16 @@ export default function POSPage() {
     setSelectedZone('');
     setCustomerPhone('');
     setCustomerAddress('');
+  };
+
+  const resetCustomerAndDeliveryFields = () => {
+    setSelectedZone('');
+    setCustomerPhone('');
+    setCustomerAddress('');
+    setExistingCustomer(null);
+    setFiarCedula('');
+    setFiarName('');
+    setFiarPhone('');
   };
 
   const handleCreateProduction = async () => {
@@ -656,9 +695,30 @@ export default function POSPage() {
     }
   };
 
-  const filteredProducts = products.filter((p) =>
-    p.name.toLowerCase().includes(search.toLowerCase())
-  );
+  const getTodayColombia = () => {
+    const now = new Date();
+    const colombiaTime = new Date(now.getTime() - 5 * 60 * 60 * 1000);
+    return colombiaTime.toISOString().split('T')[0];
+  };
+
+  const todayStr = getTodayColombia();
+
+  const filteredProducts = products.filter((p) => {
+    const matchesSearch = p.name.toLowerCase().includes(search.toLowerCase());
+    if (!matchesSearch) return false;
+
+    const isVitrina = p.preparationMode === 'VITRINA';
+    if (isVitrina) {
+      const stockDate = p.vitrinaStock?.lastStockDate;
+      const qty = p.vitrinaStock?.qty ?? 0;
+      // Active today if added today or currently has stock or marked addedToday
+      return stockDate === todayStr || qty > 0 || (p as any).addedToday;
+    } else {
+      // PREPARADO: Active if authorized for today
+      const hasAuthToday = p.preparedAuthorizations?.some((a) => a.date === todayStr);
+      return hasAuthToday || (p as any).authorizedToday || (p as any).addedToday;
+    }
+  });
 
   if (loading) {
     return (
@@ -698,7 +758,7 @@ export default function POSPage() {
           </div>
           <input
             type="text"
-            placeholder="Buscar producto..."
+            placeholder="Buscar producto activo de hoy..."
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             className="w-full px-4 py-2.5 rounded-xl border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-800 focus:ring-2 focus:ring-salo-orange outline-none"
@@ -710,40 +770,61 @@ export default function POSPage() {
             {filteredProducts.map((product) => {
               const remaining = product.vitrinaStock?.qty ?? 0;
               const isVitrina = product.preparationMode === 'VITRINA';
+              const isAgotado = isVitrina && remaining <= 0;
+
               return (
                 <div
                   key={product.id}
-                  className="bg-white dark:bg-gray-800 rounded-xl p-3 shadow-sm hover:shadow-md border border-gray-100 dark:border-gray-700 transition-all text-left flex flex-col"
+                  className={cn(
+                    "bg-white dark:bg-gray-800 rounded-xl p-3 shadow-sm hover:shadow-md border transition-all text-left flex flex-col relative",
+                    isAgotado 
+                      ? "border-red-200 dark:border-red-900/40 bg-red-50/20 dark:bg-red-950/10" 
+                      : "border-gray-100 dark:border-gray-700"
+                  )}
                 >
                   <button
                     onClick={() => handleProductSelect(product)}
-                    className="flex-1 text-left"
+                    className="flex-1 text-left group"
                   >
                     <div className="aspect-square relative rounded-lg overflow-hidden mb-2 bg-gray-100 dark:bg-gray-700">
                       {product.photoUrl ? (
                         <img
                           src={product.photoUrl}
                           alt={product.name}
-                          className="w-full h-full object-cover"
+                          className={cn(
+                            "w-full h-full object-cover transition duration-300",
+                            isAgotado && "opacity-50 grayscale"
+                          )}
                         />
                       ) : (
-                        <div className="w-full h-full flex items-center justify-center">
+                        <div className={cn("w-full h-full flex items-center justify-center", isAgotado && "opacity-50")}>
                           <UtensilsCrossed className="text-gray-400" size={32} />
                         </div>
                       )}
-                      {isVitrina && (
-                        <div className="absolute top-1 right-1 bg-black/60 text-white text-[10px] px-1.5 py-0.5 rounded-full">
+
+                      {/* Stock / Agotado badges */}
+                      {isVitrina && isAgotado && (
+                        <div className="absolute inset-0 bg-red-950/40 backdrop-blur-[1px] flex items-center justify-center p-1">
+                          <span className="bg-red-600 text-white font-black text-[11px] px-2.5 py-1 rounded-md shadow-lg uppercase tracking-wider animate-pulse">
+                            Agotado
+                          </span>
+                        </div>
+                      )}
+
+                      {isVitrina && !isAgotado && (
+                        <div className="absolute top-1 right-1 bg-black/60 backdrop-blur-xs text-white text-[10px] font-bold px-1.5 py-0.5 rounded-md">
                           Stock: {remaining}
                         </div>
                       )}
+
                       {!isVitrina && (
-                        <div className="absolute top-1 right-1 bg-blue-600/80 text-white text-[10px] px-1.5 py-0.5 rounded-full">
+                        <div className="absolute top-1 right-1 bg-blue-600/80 backdrop-blur-xs text-white text-[10px] font-bold px-1.5 py-0.5 rounded-md">
                           Preparado
                         </div>
                       )}
                     </div>
-                    <p className="font-medium text-xs truncate">{product.name}</p>
-                    <p className="text-salo-orange font-bold text-sm">{formatCurrency(product.salePrice)}</p>
+                    <p className={cn("font-medium text-xs truncate", isAgotado ? "text-gray-500" : "text-gray-900 dark:text-gray-100")}>{product.name}</p>
+                    <p className={cn("font-bold text-sm", isAgotado ? "text-red-500" : "text-salo-orange")}>{formatCurrency(product.salePrice)}</p>
                   </button>
                   {isVitrina && (
                     <button
@@ -751,15 +832,30 @@ export default function POSPage() {
                         setProductionProduct(product);
                         setShowProduction(true);
                       }}
-                      className="mt-2 w-full py-1.5 rounded-lg bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 text-[10px] font-medium flex items-center justify-center gap-1 hover:bg-gray-200 dark:hover:bg-gray-600 transition"
+                      className={cn(
+                        "mt-2 w-full py-1.5 rounded-lg text-[10px] font-bold flex items-center justify-center gap-1 transition",
+                        isAgotado
+                          ? "bg-red-600 hover:bg-red-700 text-white shadow-sm shadow-red-200"
+                          : "bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600"
+                      )}
                     >
                       <Factory size={12} />
-                      Solicitar más
+                      {isAgotado ? 'Pedir a Cocina' : 'Solicitar más'}
                     </button>
                   )}
                 </div>
               );
             })}
+
+            {filteredProducts.length === 0 && (
+              <div className="col-span-full py-16 text-center bg-white dark:bg-gray-800 rounded-2xl border border-dashed border-gray-200 dark:border-gray-700 p-6">
+                <UtensilsCrossed size={40} className="mx-auto text-gray-300 dark:text-gray-600 mb-3" />
+                <p className="text-gray-700 dark:text-gray-200 font-bold text-base mb-1">No hay productos activos para hoy</p>
+                <p className="text-xs text-gray-400 max-w-md mx-auto">
+                  El POS y la carta virtual se reinician cada día. Agrega stock en Cocina o autoriza productos preparados para comenzar a vender.
+                </p>
+              </div>
+            )}
           </div>
         </div>
       </div>
@@ -828,7 +924,7 @@ export default function POSPage() {
               >
                 <option value="">Seleccionar mesa...</option>
                 {tables.map((t) => (
-                  <option key={t.id} value={t.id}>Mesa {t.number}</option>
+                  <option key={t.id} value={t.id}>{t.number === 0 ? 'Recepción' : `Mesa ${t.number}`}</option>
                 ))}
               </select>
             )}
@@ -882,14 +978,146 @@ export default function POSPage() {
               </div>
             )}
 
-            {/* Customer name */}
-            <input
-              type="text"
-              placeholder="Nombre del cliente"
-              value={cart.customerName}
-              onChange={(e) => cart.setCustomerName(e.target.value)}
-              className="w-full px-3 py-2 rounded-lg border border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 text-sm"
-            />
+            {/* Customer name & Fiado selector */}
+            <div className="space-y-1.5">
+              <div className="flex items-center justify-between text-xs text-gray-500">
+                <span className="font-semibold flex items-center gap-1">
+                  <User size={13} className="text-purple-600" />
+                  Cliente del Pedido
+                </span>
+                {existingCustomer && (
+                  <span className="bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-300 px-2 py-0.5 rounded-full text-[10px] font-bold">
+                    Cliente Fiado
+                  </span>
+                )}
+              </div>
+
+              <div className="relative flex items-center">
+                <input
+                  type="text"
+                  list="fiados-customers-datalist"
+                  placeholder="Nombre del cliente o buscar fiado..."
+                  value={cart.customerName}
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    cart.setCustomerName(val);
+                    // Check if typed value matches any registered customer
+                    const match = fiadosCustomers.find(
+                      (c) =>
+                        c.name.toLowerCase().trim() === val.toLowerCase().trim() ||
+                        c.cedula.trim() === val.trim()
+                    );
+                    if (match) {
+                      cart.setCustomerName(match.name);
+                      setExistingCustomer({ id: match.id, name: match.name });
+                      setFiarCedula(match.cedula);
+                      setFiarName(match.name);
+                      setFiarPhone(match.phone || '');
+                      if (cart.orderType === 'DELIVERY' && match.phone && !customerPhone) {
+                        setCustomerPhone(match.phone);
+                      }
+                    } else if (existingCustomer && val !== existingCustomer.name) {
+                      setExistingCustomer(null);
+                      setFiarCedula('');
+                      setFiarName('');
+                      setFiarPhone('');
+                    }
+                  }}
+                  className={cn(
+                    "w-full px-3 py-2 rounded-lg border text-sm transition pr-8",
+                    existingCustomer
+                      ? "border-purple-300 dark:border-purple-700 bg-purple-50/50 dark:bg-purple-950/20 font-medium text-purple-900 dark:text-purple-100"
+                      : "border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-700"
+                  )}
+                />
+                <datalist id="fiados-customers-datalist">
+                  {fiadosCustomers.map((c) => (
+                    <option key={c.id} value={c.name}>
+                      CC: {c.cedula} {c.phone ? `- Tel: ${c.phone}` : ''}
+                    </option>
+                  ))}
+                </datalist>
+
+                {cart.customerName && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      cart.setCustomerName('');
+                      setExistingCustomer(null);
+                      setFiarCedula('');
+                      setFiarName('');
+                      setFiarPhone('');
+                    }}
+                    className="absolute right-2 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200"
+                    title="Limpiar cliente"
+                  >
+                    <X size={14} />
+                  </button>
+                )}
+              </div>
+
+              {/* Quick Fiados selector dropdown if registered customers exist and none selected */}
+              {fiadosCustomers.length > 0 && !existingCustomer && (
+                <div className="flex items-center gap-1.5">
+                  <select
+                    value=""
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      if (!val) return;
+                      const match = fiadosCustomers.find((c) => c.id === val);
+                      if (match) {
+                        cart.setCustomerName(match.name);
+                        setExistingCustomer({ id: match.id, name: match.name });
+                        setFiarCedula(match.cedula);
+                        setFiarName(match.name);
+                        setFiarPhone(match.phone || '');
+                        if (cart.orderType === 'DELIVERY' && match.phone && !customerPhone) {
+                          setCustomerPhone(match.phone);
+                        }
+                      }
+                    }}
+                    className="w-full text-xs py-1.5 px-2 rounded-lg border border-dashed border-purple-200 dark:border-purple-800 bg-purple-50/30 dark:bg-purple-950/10 text-purple-700 dark:text-purple-300 outline-none hover:bg-purple-50 dark:hover:bg-purple-950/20 transition cursor-pointer"
+                  >
+                    <option value="">📋 Cargar cliente fiado registrado...</option>
+                    {fiadosCustomers.map((c) => (
+                      <option key={c.id} value={c.id}>
+                        {c.name} (CC: {c.cedula})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
+
+              {/* Show selected customer details badge */}
+              {existingCustomer && (
+                <div className="flex items-center justify-between bg-purple-50 dark:bg-purple-950/30 border border-purple-200 dark:border-purple-800/50 rounded-lg px-2.5 py-1.5 text-xs">
+                  <div className="flex items-center gap-1.5 truncate">
+                    <User size={13} className="text-purple-600 shrink-0" />
+                    <span className="font-semibold text-purple-900 dark:text-purple-200 truncate">
+                      {existingCustomer.name}
+                    </span>
+                    {fiarCedula && (
+                      <span className="text-purple-600 dark:text-purple-400 text-[11px] shrink-0">
+                        (CC: {fiarCedula})
+                      </span>
+                    )}
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      cart.setCustomerName('');
+                      setExistingCustomer(null);
+                      setFiarCedula('');
+                      setFiarName('');
+                      setFiarPhone('');
+                    }}
+                    className="text-purple-400 hover:text-purple-700 p-0.5 rounded"
+                  >
+                    <X size={13} />
+                  </button>
+                </div>
+              )}
+            </div>
           </div>
 
           {/* Cart Items */}
@@ -1003,7 +1231,7 @@ export default function POSPage() {
                 Cobrar
               </button>
               <button
-                onClick={() => setShowFiar(true)}
+                onClick={handleOpenFiarModal}
                 disabled={submitting || cart.items.length === 0}
                 className="py-3 rounded-xl bg-purple-600 text-white font-semibold text-sm hover:bg-purple-700 transition disabled:opacity-50 disabled:cursor-not-allowed"
               >
@@ -1107,7 +1335,7 @@ export default function POSPage() {
           <div className="bg-white dark:bg-gray-800 rounded-2xl w-full max-w-md p-6 shadow-2xl">
             <div className="flex justify-between items-center mb-4">
               <h3 className="text-lg font-bold">Fiar Pedido</h3>
-              <button onClick={() => { setShowFiar(false); setExistingCustomer(null); setFiarCedula(''); setFiarName(''); setFiarPhone(''); }} className="p-1">
+              <button onClick={() => setShowFiar(false)} className="p-1">
                 <X size={20} />
               </button>
             </div>
@@ -1118,6 +1346,7 @@ export default function POSPage() {
               <div>
                 <label className="block text-xs font-semibold text-gray-500 mb-1">Seleccionar Cliente Registrado</label>
                 <select
+                  value={existingCustomer ? existingCustomer.id : ''}
                   onChange={(e) => {
                     const val = e.target.value;
                     if (val === '' || val === 'new') {
@@ -1132,6 +1361,7 @@ export default function POSPage() {
                         setFiarCedula(selected.cedula);
                         setFiarName(selected.name);
                         setFiarPhone(selected.phone || '');
+                        cart.setCustomerName(selected.name);
                       }
                     }
                   }}
@@ -1150,8 +1380,13 @@ export default function POSPage() {
               {existingCustomer ? (
                 <div className="p-3.5 bg-purple-50 dark:bg-purple-950/20 border border-purple-100 dark:border-purple-900/40 rounded-xl space-y-1 text-sm">
                   <p className="font-semibold text-purple-700 dark:text-purple-300">Cliente Seleccionado:</p>
-                  <p className="font-bold text-gray-800 dark:text-gray-150">{fiarName}</p>
+                  <p className="font-bold text-gray-800 dark:text-gray-150">{fiarName || existingCustomer.name}</p>
                   <p className="text-xs text-gray-500 dark:text-gray-400">CC: {fiarCedula}</p>
+                  {fiadosCustomers.find((c) => c.id === existingCustomer.id)?.totalDebt !== undefined && (
+                    <p className="text-xs text-red-500 font-medium pt-1">
+                      Deuda actual acumulada: {formatCurrency(fiadosCustomers.find((c) => c.id === existingCustomer.id)?.totalDebt || 0)}
+                    </p>
+                  )}
                 </div>
               ) : (
                 <>
@@ -1178,7 +1413,10 @@ export default function POSPage() {
                         type="text"
                         placeholder="Nombre del cliente (nuevo)"
                         value={fiarName}
-                        onChange={(e) => setFiarName(e.target.value)}
+                        onChange={(e) => {
+                          setFiarName(e.target.value);
+                          cart.setCustomerName(e.target.value);
+                        }}
                         className="w-full px-4 py-2.5 rounded-xl border border-gray-200 dark:border-gray-650 bg-gray-50 dark:bg-gray-750 text-sm outline-none focus:ring-2 focus:ring-purple-400"
                       />
                       <input

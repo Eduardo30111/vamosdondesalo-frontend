@@ -92,10 +92,11 @@ model Product {
 }
 
 model VitrinaStock {
-  id        String  @id @default(dbgenerated("gen_random_uuid()"))
-  productId String  @unique
-  qty       Int     @default(0)
-  product   Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+  id            String   @id @default(dbgenerated("gen_random_uuid()"))
+  productId     String   @unique
+  qty           Int      @default(0)
+  lastStockDate String?
+  product       Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
 }
 
 model ProductionOrder {
@@ -224,6 +225,16 @@ model Expense {
   userId      String?
 }
 
+model ScheduledExpense {
+  id          String   @id @default(dbgenerated("gen_random_uuid()"))
+  name        String
+  description String?
+  amount      Float
+  paidAmount  Float    @default(0)
+  date        DateTime @default(now())
+  userId      String?
+}
+
 model CashClose {
   id           String   @id @default(dbgenerated("gen_random_uuid()"))
   date         DateTime
@@ -265,6 +276,7 @@ model PreparedAuthorization {
 enum PlanType {
   FREE
   PRO
+  PREMIUM
 }
 
 model Store {
@@ -278,7 +290,7 @@ model Store {
   category        String      // RESTAURANT, TIENDA, ROPA, etc.
   plan            PlanType    @default(FREE)
   planExpiresAt   DateTime
-  commissionRate  Float       @default(0.08)
+  commissionRate  Float       @default(0.0)
   balance         Float       @default(0.0)
   createdAt       DateTime    @default(now())
   updatedAt       DateTime    @updatedAt
@@ -297,4 +309,31 @@ model Store {
   users           User[]      @relation("StoreUsers")
   products        Product[]
   orders          Order[]
+  chatbotConfig   ChatbotConfig?
+}
+
+model ChatbotConfig {
+  id              String   @id @default(dbgenerated("gen_random_uuid()"))
+  storeId         String   @unique
+  store           Store    @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  active          Boolean  @default(false)
+  botName         String   @default("Asistente Virtual")
+  welcomeMessage  String   @default("¡Hola! ¿En qué puedo ayudarte hoy?")
+  whatsappNumber  String?
+  evolutionApiKey String?
+  n8nUrl          String?
+  businessHours   String   @default("8:00 AM - 8:00 PM")
+  language        String   @default("es")
+  tone            String   @default("profesional")
+  promotions      String?
+  featuredProducts String?
+  autoMessages    String?
+
+  // Metrics
+  conversations   Int   @default(0)
+  ordersGenerated Int   @default(0)
+  salesAttributed Float @default(0.0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 }

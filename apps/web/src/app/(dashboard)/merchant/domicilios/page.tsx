@@ -161,7 +161,7 @@ export default function MerchantDomiciliosPage() {
             </div>
 
             <p className="text-sm text-gray-500 dark:text-gray-400 max-w-sm mb-8">
-              El plan PRO te brinda acceso a la gestión de despachos en tiempo real, múltiples repartidores, historial de domicilios y comisiones rebajadas al 4%.
+              El plan PRO te brinda acceso a la gestión de despachos en tiempo real, múltiples repartidores, historial de domicilios y mucho más.
             </p>
 
             <a

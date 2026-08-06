@@ -81,11 +81,7 @@ export default function PremiumPaywall({ moduleName, description, icon: Icon, st
                 <div>Hasta 50 productos</div>
                 <div className="text-purple-600 dark:text-purple-400 font-bold">Ilimitados</div>
               </div>
-              <div className="grid grid-cols-3 p-3 items-center">
-                <div className="text-left pl-2 font-bold text-gray-800 dark:text-gray-200">Tasa de Comisión</div>
-                <div>8% por venta</div>
-                <div className="text-purple-600 dark:text-purple-400 font-bold">4% por venta</div>
-              </div>
+
               <div className="grid grid-cols-3 p-3 items-center">
                 <div className="text-left pl-2 font-bold text-gray-800 dark:text-gray-200">Domicilios y Entregas</div>
                 <div className="text-red-500 flex justify-center"><X size={16} /></div>

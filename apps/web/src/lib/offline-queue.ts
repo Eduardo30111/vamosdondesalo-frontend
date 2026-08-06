@@ -1,4 +1,5 @@
 import { api } from './api';
+import { isNetworkOrServerError } from './error-handler';
 
 export interface OfflineQueueItem {
   id: string; // temp local id
@@ -65,16 +66,7 @@ export function removeFromOfflineQueue(id: string) {
 }
 
 export function isNetworkError(error: any): boolean {
-  const message = error?.message?.toLowerCase() || '';
-  return (
-    message.includes('failed to fetch') ||
-    message.includes('network error') ||
-    message.includes('load failed') ||
-    message.includes('server error') ||
-    message.includes('error 502') ||
-    message.includes('error 503') ||
-    message.includes('error 504')
-  );
+  return isNetworkOrServerError(error);
 }
 
 export async function syncOfflineQueue(onProgress?: (msg: string) => void): Promise<{ success: number; failed: number }> {

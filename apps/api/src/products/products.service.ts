@@ -12,6 +12,7 @@ export class ProductsService {
   ) {}
 
   async findAll() {
+    await this.prisma.checkAndResetDailyStock();
     return this.prisma.product.findMany({
       where: {
         active: true,
@@ -20,10 +21,6 @@ export class ProductsService {
           {
             store: {
               active: true,
-              OR: [
-                { planExpiresAt: { gt: new Date() } },
-                { balance: { gte: 5000 } }
-              ]
             }
           }
         ]
@@ -34,18 +31,49 @@ export class ProductsService {
   }
 
   async findAllForUser(userId: string) {
+    await this.prisma.checkAndResetDailyStock();
+    const todayStr = this.prisma.getColombiaTodayStr();
     const user = await this.prisma.user.findUnique({
       where: { id: userId },
-      select: { storeId: true },
+      select: { storeId: true, role: true },
     });
 
-    return this.prisma.product.findMany({
-      where: {
-        active: true,
-        storeId: user?.storeId || null,
+    const whereClause: any = { active: true };
+    if (user?.role === 'ADMIN') {
+      whereClause.OR = [
+        { storeId: user.storeId },
+        { storeId: null }
+      ];
+    } else {
+      whereClause.storeId = user?.storeId || null;
+    }
+
+    const products = await this.prisma.product.findMany({
+      where: whereClause,
+      include: {
+        vitrinaStock: true,
+        store: true,
+        preparedAuthorizations: {
+          where: { date: todayStr }
+        }
       },
-      include: { vitrinaStock: true, store: true },
       orderBy: { name: 'asc' },
+    });
+
+    return products.map(p => {
+      const isVitrina = p.preparationMode === 'VITRINA';
+      const hasStock = isVitrina ? (p.vitrinaStock?.qty ?? 0) > 0 : false;
+      const isAddedToday = isVitrina
+        ? (p.vitrinaStock?.lastStockDate === todayStr || hasStock)
+        : (p.preparedAuthorizations && p.preparedAuthorizations.length > 0);
+      const isAgotado = isVitrina && isAddedToday && !hasStock;
+
+      return {
+        ...p,
+        addedToday: !!isAddedToday,
+        isAgotado: !!isAgotado,
+        authorizedToday: !isVitrina ? (p.preparedAuthorizations && p.preparedAuthorizations.length > 0) : undefined,
+      };
     });
   }
 
@@ -79,10 +107,6 @@ export class ProductsService {
           throw new BadRequestException('El plan gratuito está limitado a un máximo de 50 productos activos');
         }
       }
-
-      if (new Date() > store.planExpiresAt && store.balance < 5000) {
-        throw new BadRequestException('Saldo insuficiente para activar productos. Debes realizar una recarga.');
-      }
     }
 
     const product = await this.prisma.product.create({
@@ -91,7 +115,7 @@ export class ProductsService {
         description: dto.description,
         photoUrl: dto.photoUrl,
         salePrice: dto.salePrice,
-        costPrice: dto.costPrice,
+        costPrice: dto.costPrice ?? 0,
         type: dto.type,
         preparationMode: (dto.preparationMode as any) ?? 'VITRINA',
         dailyStock: dto.dailyStock ?? 0,
@@ -104,9 +128,14 @@ export class ProductsService {
 
     // Si es vitrina, inicializar stock
     if (product.preparationMode === 'VITRINA') {
+      const todayStr = this.prisma.getColombiaTodayStr();
       const initialStock = (isIndependentStore || product.type === 'SUPPLIER') ? product.dailyStock : 0;
       await this.prisma.vitrinaStock.create({
-        data: { productId: product.id, qty: initialStock },
+        data: {
+          productId: product.id,
+          qty: initialStock,
+          lastStockDate: initialStock > 0 ? todayStr : null,
+        },
       });
 
       if (isIndependentStore) {
@@ -164,9 +193,6 @@ export class ProductsService {
           if (activeCount >= 50) {
             throw new BadRequestException('El plan gratuito está limitado a un máximo de 50 productos activos');
           }
-        }
-        if (new Date() > store.planExpiresAt && store.balance < 5000) {
-          throw new BadRequestException('Saldo insuficiente para activar productos. Debes realizar una recarga.');
         }
       }
     }
@@ -275,6 +301,7 @@ export class ProductsService {
   }
 
   async receiveSupplierStock(id: string, qty: number) {
+    const todayStr = this.prisma.getColombiaTodayStr();
     const updated = await this.prisma.product.update({
       where: { id },
       data: {
@@ -284,8 +311,8 @@ export class ProductsService {
 
     await this.prisma.vitrinaStock.upsert({
       where: { productId: id },
-      create: { productId: id, qty },
-      update: { qty: { increment: qty } },
+      create: { productId: id, qty, lastStockDate: todayStr },
+      update: { qty: { increment: qty }, lastStockDate: todayStr },
     });
 
     this.realtime.emitVitrinaUpdated({ action: 'receiveSupplierStock', product: updated });
@@ -310,7 +337,28 @@ export class ProductsService {
     return updated;
   }
 
-  async delete(id: string) {
+  async addVitrinaStock(id: string, qty: number) {
+    const todayStr = this.prisma.getColombiaTodayStr();
+    await this.prisma.vitrinaStock.upsert({
+      where: { productId: id },
+      create: { productId: id, qty, lastStockDate: todayStr },
+      update: { qty: { increment: qty }, lastStockDate: todayStr },
+    });
+
+    const product = await this.prisma.product.findUnique({
+      where: { id },
+      include: { vitrinaStock: true },
+    });
+
+    this.realtime.emitVitrinaUpdated({ action: 'update', product });
+    return product;
+  }
+
+  async delete(id: string, isAdmin = true, storeId?: string) {
+    const product = await this.prisma.product.findUniqueOrThrow({ where: { id } });
+    if (!isAdmin && product.storeId !== storeId) {
+      throw new BadRequestException('No tienes permiso para eliminar este producto');
+    }
     const deleted = await this.prisma.product.update({ where: { id }, data: { active: false } });
     this.realtime.emitVitrinaUpdated({ action: 'delete', id });
     return deleted;

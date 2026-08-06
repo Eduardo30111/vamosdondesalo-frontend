@@ -18,6 +18,7 @@ const METHOD_LABELS: Record<string, string> = {
   BANCOLOMBIA: 'Bancolombia',
   DAVIPLATA: 'Daviplata',
   TRANSFER: 'Transferencia',
+  BREB: 'Breb',
 };
 
 export default function PagosPage() {
@@ -66,14 +67,43 @@ export default function PagosPage() {
               </label>
             </div>
             {m.method !== 'CASH' && (
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
-                  <label className="text-xs text-gray-500">URL del QR</label>
-                  <input type="url" defaultValue={m.qrUrl || ''} onBlur={(e) => handleUpdate(m.method, { qrUrl: e.target.value })} className="w-full px-3 py-2 rounded-lg border border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 text-sm" placeholder="https://..." />
+                  <label className="text-xs text-gray-500 block mb-1">Imagen del QR</label>
+                  {m.qrUrl && (
+                    <div className="mb-2 w-20 h-20 border rounded-lg overflow-hidden relative group bg-gray-50 dark:bg-gray-700">
+                      <img src={m.qrUrl} alt="QR Code" className="w-full h-full object-cover" />
+                    </div>
+                  )}
+                  <input
+                    type="file"
+                    accept="image/*"
+                    onChange={async (e) => {
+                      const file = e.target.files?.[0];
+                      if (!file) return;
+                      try {
+                        const fd = new FormData();
+                        fd.append('file', file);
+                        const uploadToast = toast.loading('Subiendo imagen...');
+                        const up = await api.upload<{ url: string; publicId: string }>('/upload/product-image', fd);
+                        toast.success('Imagen de QR subida', { id: uploadToast });
+                        handleUpdate(m.method, { qrUrl: up.url });
+                      } catch (err: any) {
+                        toast.error(err.message || 'Error al subir imagen');
+                      }
+                    }}
+                    className="w-full text-xs text-gray-500 file:mr-4 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-semibold file:bg-orange-50 file:text-orange-700 hover:file:bg-orange-100 dark:file:bg-gray-700 dark:file:text-gray-300 cursor-pointer"
+                  />
                 </div>
                 <div>
-                  <label className="text-xs text-gray-500">Llave / Número</label>
-                  <input type="text" defaultValue={m.key || ''} onBlur={(e) => handleUpdate(m.method, { key: e.target.value })} className="w-full px-3 py-2 rounded-lg border border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 text-sm" placeholder="Número o referencia" />
+                  <label className="text-xs text-gray-500 block mb-1">Llave / Número</label>
+                  <input
+                    type="text"
+                    defaultValue={m.key || ''}
+                    onBlur={(e) => handleUpdate(m.method, { key: e.target.value })}
+                    className="w-full px-3 py-2 rounded-lg border border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 text-sm"
+                    placeholder="Número o referencia"
+                  />
                 </div>
               </div>
             )}

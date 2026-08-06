@@ -49,9 +49,16 @@ export class ProductsController {
     return this.productsService.returnSupplierStock(id, qty);
   }
 
+  @Put(':id/add-vitrina-stock')
+  @Roles('ADMIN', 'MERCHANT', 'COCINA', 'VENDEDOR')
+  addVitrinaStock(@Param('id') id: string, @Body('qty') qty: number) {
+    return this.productsService.addVitrinaStock(id, qty);
+  }
+
   @Delete(':id')
-  @Roles('ADMIN')
-  delete(@Param('id') id: string) {
-    return this.productsService.delete(id);
+  @Roles('ADMIN', 'MERCHANT', 'COCINA', 'VENDEDOR')
+  delete(@Request() req: any, @Param('id') id: string) {
+    const storeId = req.user.role === 'ADMIN' ? undefined : req.user.storeId;
+    return this.productsService.delete(id, req.user.role === 'ADMIN', storeId);
   }
 }

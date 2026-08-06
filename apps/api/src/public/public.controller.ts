@@ -83,8 +83,16 @@ export class PublicController {
   }
 
   private async getAvailableProducts() {
+    await this.prisma.checkAndResetDailyStock();
     const now = new Date();
-    const [vitrinaProducts, preparedProducts] = await Promise.all([
+    // Colombia timezone America/Bogota (UTC-5)
+    const colombiaTime = new Date(now.getTime() - 5 * 60 * 60 * 1000);
+    const year = colombiaTime.getFullYear();
+    const month = String(colombiaTime.getMonth() + 1).padStart(2, '0');
+    const day = String(colombiaTime.getDate()).padStart(2, '0');
+    const todayDateStr = `${year}-${month}-${day}`;
+
+    const [vitrinaProducts, preparedProducts, todayAuthorizations] = await Promise.all([
       this.prisma.product.findMany({
         where: {
           active: true,
@@ -94,10 +102,6 @@ export class PublicController {
             {
               store: {
                 active: true,
-                OR: [
-                  { planExpiresAt: { gt: new Date() } },
-                  { balance: { gte: 5000 } }
-                ]
               }
             }
           ]
@@ -114,10 +118,6 @@ export class PublicController {
             {
               store: {
                 active: true,
-                OR: [
-                  { planExpiresAt: { gt: new Date() } },
-                  { balance: { gte: 5000 } }
-                ]
               }
             }
           ]
@@ -125,21 +125,35 @@ export class PublicController {
         include: { store: true },
         orderBy: { name: 'asc' },
       }),
+      this.prisma.preparedAuthorization.findMany({
+        where: { date: todayDateStr },
+        select: { productId: true },
+      }),
     ]);
 
+    const authorizedProductIds = new Set(todayAuthorizations.map((a) => a.productId));
+
     const visibleVitrina = vitrinaProducts
+      .filter((p) => p.vitrinaStock?.lastStockDate === todayDateStr || (p.vitrinaStock?.qty ?? 0) > 0)
       .map((p) => {
         const qty = p.vitrinaStock?.qty ?? 0;
         const isFreeStore = p.store?.plan === 'FREE';
+        const isAgotado = qty <= 0;
         return {
           ...p,
           remaining: isFreeStore ? undefined : qty,
-          hasStock: isFreeStore ? true : qty > 0
+          hasStock: qty > 0,
+          isAgotado,
         };
-      })
-      .filter((p) => p.hasStock);
+      });
 
     const visiblePrepared = preparedProducts
+      .filter((p) => authorizedProductIds.has(p.id))
+      .map((p) => ({
+        ...p,
+        hasStock: true,
+        isAgotado: false,
+      }))
       .sort((a, b) => a.name.localeCompare(b.name));
 
     return [...visibleVitrina, ...visiblePrepared];

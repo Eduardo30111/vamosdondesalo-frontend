@@ -279,8 +279,9 @@ export default function ProductosPage() {
                     type="number"
                     required={form.saleType !== 'MENUDEO'}
                     disabled={form.saleType === 'UNIT' && variants.length > 0}
-                    value={(form.saleType === 'UNIT' && variants.length > 0) ? '' : form.salePrice}
+                    value={(form.saleType === 'UNIT' && variants.length > 0) ? '' : (form.salePrice || '')}
                     onChange={(e) => setForm({ ...form, salePrice: +e.target.value })}
+                    onFocus={(e) => e.target.select()}
                     placeholder={form.saleType === 'UNIT' && variants.length > 0 ? 'En variantes' : 'Ej: 3000'}
                     className="w-full px-3 py-2 rounded-lg border border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 text-sm disabled:opacity-50"
                     min="0"
@@ -288,7 +289,7 @@ export default function ProductosPage() {
                 </div>
                 <div>
                   <label className="text-xs text-gray-500 mb-1 block">Precio costo</label>
-                  <input type="number" value={form.costPrice} onChange={(e) => setForm({ ...form, costPrice: +e.target.value })} className="w-full px-3 py-2 rounded-lg border border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 text-sm" min="0" required />
+                  <input type="number" value={form.costPrice || ''} onChange={(e) => setForm({ ...form, costPrice: +e.target.value })} onFocus={(e) => e.target.select()} className="w-full px-3 py-2 rounded-lg border border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 text-sm" min="0" />
                 </div>
               </div>
 
@@ -341,6 +342,7 @@ export default function ProductosPage() {
                               newVariants[index].price = Number(e.target.value);
                               setVariants(newVariants);
                             }}
+                            onFocus={(e) => e.target.select()}
                             className="w-20 px-2 py-1.5 rounded border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-700 text-xs outline-none focus:ring-1 focus:ring-orange-500"
                           />
                           {variants.length > 1 && (
@@ -366,9 +368,8 @@ export default function ProductosPage() {
                 </div>
               )}
 
-              <div className="grid grid-cols-2 gap-3">
-                <div><label className="text-xs text-gray-500">Tipo</label><select value={form.type} onChange={(e) => setForm({ ...form, type: e.target.value, supplierId: e.target.value === 'OWN' ? undefined : form.supplierId })} className="w-full px-3 py-2 rounded-lg border border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 text-sm"><option value="OWN">Propio</option><option value="SUPPLIER">Proveedor</option></select></div>
-                <div><label className="text-xs text-gray-500">Stock diario</label><input type="number" value={form.dailyStock} onChange={(e) => setForm({ ...form, dailyStock: +e.target.value })} className="w-full px-3 py-2 rounded-lg border border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 text-sm" min="0" required /></div>
+              <div>
+                <label className="text-xs text-gray-500">Tipo</label><select value={form.type} onChange={(e) => setForm({ ...form, type: e.target.value, supplierId: e.target.value === 'OWN' ? undefined : form.supplierId })} className="w-full px-3 py-2 rounded-lg border border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 text-sm"><option value="OWN">Propio</option><option value="SUPPLIER">Proveedor</option></select>
               </div>
               {form.type === 'SUPPLIER' && (
                 <div>

@@ -59,10 +59,28 @@ export class OrdersController {
     return this.ordersService.findCocina();
   }
 
+  @Get('cocina/daily-summary')
+  @Roles('ADMIN', 'VENDEDOR', 'COCINA')
+  getCocinaDailySummary(@Query('month') month?: string) {
+    return this.ordersService.getCocinaDailySummary(month);
+  }
+
   @Get('deliveries')
   @Roles('ADMIN', 'VENDEDOR')
   findDeliveries() {
     return this.ordersService.findDeliveries();
+  }
+
+  @Get('deliveries/daily-summary')
+  @Roles('ADMIN', 'VENDEDOR')
+  getDeliveriesDailySummary(@Query('month') month?: string) {
+    return this.ordersService.getDeliveriesDailySummary(month);
+  }
+
+  @Get('by-date')
+  @Roles('ADMIN', 'VENDEDOR')
+  findByDate(@Query('date') dateStr: string) {
+    return this.ordersService.findByDate(dateStr);
   }
 
   @Get(':id')
@@ -96,7 +114,7 @@ export class OrdersController {
   }
 
   @Put(':id/cancelar')
-  @Roles('ADMIN', 'VENDEDOR', 'MERCHANT')
+  @Roles('ADMIN', 'VENDEDOR', 'MERCHANT', 'COCINA')
   cancelar(@Param('id') id: string) {
     return this.ordersService.cancelar(id);
   }
@@ -108,7 +126,7 @@ export class OrdersController {
   }
 
   @Put(':id/remove-item/:itemId')
-  @Roles('ADMIN', 'VENDEDOR', 'MERCHANT')
+  @Roles('ADMIN', 'VENDEDOR', 'MERCHANT', 'COCINA')
   removeItem(@Param('id') id: string, @Param('itemId') itemId: string) {
     return this.ordersService.removeItem(id, itemId);
   }

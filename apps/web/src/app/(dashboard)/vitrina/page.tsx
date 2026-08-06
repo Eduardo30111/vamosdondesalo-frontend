@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation';
 import { api } from '@/lib/api';
 import { useAuthStore } from '@/store/auth';
 import { getSocket, joinRoom } from '@/lib/socket';
-import { formatCurrency } from '@/lib/utils';
+import { formatCurrency, toLocalDateInputValue } from '@/lib/utils';
 import { toast } from 'sonner';
 import { getOfflineQueue, saveOfflineQueue, removeFromOfflineQueue, syncOfflineQueue, OfflineQueueItem } from '@/lib/offline-queue';
 import {
@@ -24,6 +24,7 @@ import {
   ChefHat,
   Smartphone,
   Banknote,
+  User,
 } from 'lucide-react';
 
 interface OrderItem {
@@ -43,6 +44,8 @@ interface Order {
   createdAt: string;
   items: OrderItem[];
   table?: { number: number };
+  paymentStatus?: string;
+  payments?: Array<{ method: string; amount: number }>;
 }
 
 interface Product {
@@ -109,6 +112,29 @@ const queueItemToOrder = (item: OfflineQueueItem): Order => {
   };
 };
 
+const minutosDesde = (dateStr: string) => {
+  const diffMs = Date.now() - new Date(dateStr).getTime();
+  return Math.max(0, Math.floor(diffMs / 60000));
+};
+
+const getOrderPaymentMethodsText = (order: Order) => {
+  if (order.paymentStatus === 'FIADO') {
+    return 'Fiado';
+  }
+  
+  if (order.payments && order.payments.length > 0) {
+    const methods = order.payments.map((p: any) => {
+      if (p.method === 'CASH') return 'Efectivo';
+      if (p.method === 'NEQUI') return 'Nequi';
+      return p.method;
+    });
+    const uniqueMethods = Array.from(new Set(methods));
+    return uniqueMethods.join(', ');
+  }
+  
+  return 'Pendiente';
+};
+
 export default function VitrinaPage() {
   const router = useRouter();
   const { user, hydrate } = useAuthStore();
@@ -151,6 +177,26 @@ export default function VitrinaPage() {
   const [processingCash, setProcessingCash] = useState(false);
   const [customers, setCustomers] = useState<any[]>([]);
   const [customerSearch, setCustomerSearch] = useState('');
+
+  // Pago incompleto (fiar el resto) states
+  const [isPartialPayment, setIsPartialPayment] = useState(false);
+  const [partialCedula, setPartialCedula] = useState('');
+  const [partialCustomer, setPartialCustomer] = useState<any>(null);
+  const [partialNewName, setPartialNewName] = useState('');
+  const [partialNewPhone, setPartialNewPhone] = useState('');
+
+  // Abono modal
+  const [showAbonoModal, setShowAbonoModal] = useState(false);
+  const [abonoCustomer, setAbonoCustomer] = useState<any>(null);
+  const [abonoAmount, setAbonoAmount] = useState('');
+  const [abonoMethod, setAbonoMethod] = useState<'Efectivo' | 'Transferencia'>('Efectivo');
+  const [processingAbono, setProcessingAbono] = useState(false);
+
+  // Ventas del día (sales history table)
+  const [salesDate, setSalesDate] = useState(toLocalDateInputValue(new Date()));
+  const [dailySales, setDailySales] = useState<Order[]>([]);
+  const [expandedSales, setExpandedSales] = useState<Record<string, boolean>>({});
+  const [salesLoading, setSalesLoading] = useState(false);
 
   useEffect(() => {
     if (user && user.role !== 'COCINA') {
@@ -224,6 +270,7 @@ export default function VitrinaPage() {
       if (navigator.onLine) {
         serverOrders = await api.get<Order[]>('/orders/cuentas-activas');
         localStorage.setItem('salo_cached_active_orders', JSON.stringify(serverOrders));
+        fetchDailySales(salesDate);
       } else {
         const cached = localStorage.getItem('salo_cached_active_orders');
         serverOrders = cached ? JSON.parse(cached) : [];
@@ -265,6 +312,26 @@ export default function VitrinaPage() {
     }
   };
 
+  const fetchDailySales = async (date: string) => {
+    try {
+      setSalesLoading(true);
+      if (navigator.onLine) {
+        const data = await api.get<Order[]>(`/orders/by-date?date=${date}`);
+        setDailySales(data);
+      }
+    } catch (e) {
+      console.error('Error fetching daily sales:', e);
+    } finally {
+      setSalesLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (user && user.role !== 'COCINA' && salesDate) {
+      fetchDailySales(salesDate);
+    }
+  }, [salesDate, user]);
+
   const handleRemoveItem = async (orderId: string, itemId: string) => {
     if (!navigator.onLine) {
       toast.error('Debes estar conectado a internet para editar cuentas activas');
@@ -301,6 +368,11 @@ export default function VitrinaPage() {
     setCashOrderId(id);
     setCashOrderTotal(total);
     setReceivedCashAmount('');
+    setIsPartialPayment(false);
+    setPartialCedula('');
+    setPartialCustomer(null);
+    setPartialNewName('');
+    setPartialNewPhone('');
     setShowCashModal(true);
   };
 
@@ -329,14 +401,49 @@ export default function VitrinaPage() {
 
     try {
       const order = orders.find((o) => o.id === id);
-      const amount = order ? order.total : 0;
-      await api.post('/payments', { orderId: id, method: 'CASH', amount });
-      toast.success('Pago en efectivo registrado');
-      setShowCashModal(false);
-      fetchOrders();
-    } catch (e) {
+      const orderTotal = order ? order.total : cashOrderTotal;
+      const paidAmount = parseFloat(receivedCashAmount) || 0;
+
+      if (isPartialPayment) {
+        let customerId = partialCustomer?.id;
+        if (!customerId) {
+          if (!partialNewName.trim() || partialCedula.length < 5) {
+            alert('Ingresa nombre y cédula del cliente');
+            setProcessingCash(false);
+            return;
+          }
+          const data = await api.post<any>('/customers', {
+            name: partialNewName,
+            cedula: partialCedula,
+            phone: partialNewPhone || undefined,
+          });
+          customerId = data.id;
+        }
+
+        const remainder = Math.max(0, orderTotal - paidAmount);
+
+        // 1. Register the partial payment in Cash
+        await api.post('/payments', { orderId: id, method: 'CASH', amount: paidAmount });
+        
+        // 2. Charge the remainder to the customer's debt
+        await api.post(`/customers/${customerId}/charge`, { amount: remainder });
+
+        // 3. Mark the order as FIADO and link the customer
+        await api.put(`/orders/${id}/fiar`, { customerId });
+
+        toast.success('Pago parcial registrado y saldo restante fiado');
+        setShowCashModal(false);
+        fetchOrders();
+        fetchCustomers();
+      } else {
+        await api.post('/payments', { orderId: id, method: 'CASH', amount: orderTotal });
+        toast.success('Pago en efectivo registrado');
+        setShowCashModal(false);
+        fetchOrders();
+      }
+    } catch (e: any) {
       console.error(e);
-      alert('Error al procesar el pago');
+      alert('Error al procesar el pago: ' + (e.message || ''));
     } finally {
       setProcessingCash(false);
     }
@@ -394,6 +501,20 @@ export default function VitrinaPage() {
       }
     } catch {
       setFoundCustomer(null);
+    }
+  };
+
+  const buscarPartialCedula = async () => {
+    if (!partialCedula.trim()) return;
+    try {
+      if (navigator.onLine) {
+        const data = await api.get<any>(`/customers/cedula/${partialCedula}`);
+        setPartialCustomer(data);
+      } else {
+        setPartialCustomer(null);
+      }
+    } catch {
+      setPartialCustomer(null);
     }
   };
 
@@ -456,6 +577,24 @@ export default function VitrinaPage() {
     } catch {
       const cached = localStorage.getItem('salo_cached_products');
       setProducts(cached ? JSON.parse(cached) : []);
+    }
+  };
+
+  const handleDeleteProduct = async (product: Product) => {
+    if (!confirm(`¿Eliminar el producto "${product.name}" de forma permanente del catálogo?`)) return;
+    try {
+      await api.delete(`/products/${product.id}`);
+      toast.success('Producto eliminado con éxito');
+      let prods: Product[] = [];
+      if (navigator.onLine) {
+        prods = await api.get<Product[]>('/products');
+      } else {
+        const cached = localStorage.getItem('salo_cached_products');
+        prods = cached ? JSON.parse(cached) : [];
+      }
+      setProducts(prods);
+    } catch (err: any) {
+      toast.error(err.message || 'Error eliminando el producto');
     }
   };
 
@@ -545,11 +684,41 @@ export default function VitrinaPage() {
     setNequiOrderTotal(total);
     setNequiAmount(total.toString());
     setNequiPayingTotal(true);
+    setIsPartialPayment(false);
+    setPartialCedula('');
+    setPartialCustomer(null);
+    setPartialNewName('');
+    setPartialNewPhone('');
     setShowNequiModal(true);
   };
 
   const nequiAmountNum = parseFloat(nequiAmount) || 0;
   const cashAmount = Math.max(0, nequiOrderTotal - nequiAmountNum);
+
+  const paidCashAmount = parseFloat(receivedCashAmount) || 0;
+  const isCashButtonDisabled = processingCash || (
+    isPartialPayment ? (
+      !isOnline ||
+      paidCashAmount <= 0 ||
+      paidCashAmount >= cashOrderTotal ||
+      (!partialCustomer && (!partialNewName.trim() || partialCedula.length < 5))
+    ) : (
+      !receivedCashAmount ||
+      paidCashAmount < cashOrderTotal
+    )
+  );
+
+  const isNequiButtonDisabled = processingNequi || (
+    isPartialPayment ? (
+      !isOnline ||
+      nequiAmountNum <= 0 ||
+      nequiAmountNum >= nequiOrderTotal ||
+      (!partialCustomer && (!partialNewName.trim() || partialCedula.length < 5))
+    ) : (
+      nequiAmountNum <= 0 ||
+      nequiAmountNum > nequiOrderTotal
+    )
+  );
 
   const confirmarNequi = async () => {
     if (!nequiOrderId || nequiAmountNum <= 0) return;
@@ -573,42 +742,80 @@ export default function VitrinaPage() {
 
     setProcessingNequi(true);
     try {
-      // Register Nequi payment
-      await api.post('/payments', {
-        orderId: nequiOrderId,
-        method: 'NEQUI',
-        amount: nequiAmountNum,
-      });
+      if (isPartialPayment) {
+        let customerId = partialCustomer?.id;
+        if (!customerId) {
+          if (!partialNewName.trim() || partialCedula.length < 5) {
+            alert('Ingresa nombre y cédula del cliente');
+            setProcessingNequi(false);
+            return;
+          }
+          const data = await api.post<any>('/customers', {
+            name: partialNewName,
+            cedula: partialCedula,
+            phone: partialNewPhone || undefined,
+          });
+          customerId = data.id;
+        }
 
-      // If there's a cash remainder, register cash payment too
-      if (cashAmount > 0) {
+        const remainder = Math.max(0, nequiOrderTotal - nequiAmountNum);
+
+        // 1. Register the partial payment in Nequi
         await api.post('/payments', {
           orderId: nequiOrderId,
-          method: 'CASH',
-          amount: cashAmount,
+          method: 'NEQUI',
+          amount: nequiAmountNum,
         });
-      }
 
-      setShowNequiModal(false);
-      fetchOrders();
-    } catch (e) {
+        // 2. Charge the remainder to the customer's debt
+        await api.post(`/customers/${customerId}/charge`, { amount: remainder });
+
+        // 3. Mark the order as FIADO and link the customer
+        await api.put(`/orders/${nequiOrderId}/fiar`, { customerId });
+
+        toast.success('Pago parcial registrado y saldo restante fiado');
+        setShowNequiModal(false);
+        fetchOrders();
+        fetchCustomers();
+      } else {
+        // Register Nequi payment
+        await api.post('/payments', {
+          orderId: nequiOrderId,
+          method: 'NEQUI',
+          amount: nequiAmountNum,
+        });
+
+        // If there's a cash remainder, register cash payment too
+        if (cashAmount > 0) {
+          await api.post('/payments', {
+            orderId: nequiOrderId,
+            method: 'CASH',
+            amount: cashAmount,
+          });
+        }
+
+        toast.success('Pago registrado exitosamente');
+        setShowNequiModal(false);
+        fetchOrders();
+      }
+    } catch (e: any) {
       console.error(e);
-      alert('Error al procesar el pago');
+      alert('Error al procesar el pago: ' + (e.message || ''));
     } finally {
       setProcessingNequi(false);
     }
   };
 
-  // ─── Helpers ──────────────────────────────
-  const minutosDesde = (date: string) => {
-    const diff = Date.now() - new Date(date).getTime();
-    return Math.floor(diff / 60000);
-  };
-
   if (!user) return <div className="p-8 text-center">Cargando...</div>;
 
+  const filteredCustomers = customers.filter((c) => {
+    const q = customerSearch.toLowerCase().trim();
+    if (!q) return true;
+    return c.name.toLowerCase().includes(q) || c.cedula.includes(q);
+  });
+
   return (
-    <div className="p-4 md:p-8 max-w-5xl mx-auto">
+    <div className="p-4 md:p-8 max-w-7xl mx-auto">
       <div className="flex items-center justify-between mb-2">
         <h1 className="text-2xl font-bold flex items-center gap-2">Vitrina — Cuentas Activas</h1>
         <div className="flex items-center gap-2">
@@ -733,25 +940,39 @@ export default function VitrinaPage() {
                 {filteredProducts.map((product) => {
                   const inCart = newItems.find((i) => i.product.id === product.id);
                   const isPrep = product.preparationMode === 'PREPARADO';
-                  return (
-                    <button
+                   return (
+                    <div
                       key={product.id}
                       onClick={() => addNewItem(product)}
-                      className="bg-gray-50 dark:bg-gray-700 rounded-xl p-3 text-left hover:bg-orange-50 dark:hover:bg-orange-900/20 transition relative"
+                      className="bg-gray-50 dark:bg-gray-700 rounded-xl p-3 text-left hover:bg-orange-50 dark:hover:bg-orange-900/20 transition relative cursor-pointer"
                     >
                       {inCart && (
                         <span className="absolute top-2 right-2 w-5 h-5 bg-salo-orange text-white text-[10px] font-bold rounded-full flex items-center justify-center">
                           {inCart.qty}
                         </span>
                       )}
-                      <p className="font-medium text-xs truncate">{product.name}</p>
+                      <p className="font-medium text-xs truncate pr-6">{product.name}</p>
                       <p className="text-salo-orange font-bold text-sm mt-0.5">{formatCurrency(product.salePrice)}</p>
-                      {isPrep && (
-                        <span className="inline-flex items-center gap-0.5 mt-1 text-[10px] text-blue-500 font-medium">
-                          <ChefHat size={10} /> Preparado
-                        </span>
-                      )}
-                    </button>
+                      <div className="flex justify-between items-end mt-1">
+                        {isPrep ? (
+                          <span className="inline-flex items-center gap-0.5 text-[10px] text-blue-500 font-medium">
+                            <ChefHat size={10} /> Preparado
+                          </span>
+                        ) : (
+                          <span />
+                        )}
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleDeleteProduct(product);
+                          }}
+                          className="p-1.5 text-red-500 hover:text-red-650 hover:bg-red-50 dark:hover:bg-red-950/20 rounded-lg transition"
+                          title="Eliminar producto"
+                        >
+                          <Trash2 size={12} />
+                        </button>
+                      </div>
+                    </div>
                   );
                 })}
               </div>
@@ -821,7 +1042,7 @@ export default function VitrinaPage() {
       {/* ═══ Modal Efectivo (Calculadora de Cambio) ═══ */}
       {showCashModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50">
-          <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-full max-w-sm p-6 relative animate-in fade-in zoom-in duration-200">
+          <div className={`bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-full ${isPartialPayment ? 'max-w-md' : 'max-w-sm'} p-6 relative transition-all duration-300 animate-in fade-in zoom-in`}>
             <button onClick={() => setShowCashModal(false)} className="absolute top-4 right-4 p-1"><X size={20} /></button>
 
             {/* Header */}
@@ -851,20 +1072,137 @@ export default function VitrinaPage() {
               </div>
             </div>
 
-            {/* Change calculation */}
-            {parseFloat(receivedCashAmount) > 0 && (
-              <div className="p-3 bg-green-50 dark:bg-green-950/20 rounded-xl flex justify-between items-center mb-4">
-                <span className="text-sm font-medium text-green-700 dark:text-green-400">Cambio a devolver:</span>
-                <span className="text-lg font-bold text-green-700 dark:text-green-400">
-                  {formatCurrency(Math.max(0, (parseFloat(receivedCashAmount) || 0) - cashOrderTotal))}
-                </span>
+            {/* Pago Incompleto Checkbox */}
+            <div className="mb-4">
+              <label className="flex items-center gap-3 p-3 bg-gray-50 dark:bg-gray-700 rounded-xl cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={isPartialPayment}
+                  onChange={(e) => setIsPartialPayment(e.target.checked)}
+                  className="w-4 h-4 accent-green-600 rounded"
+                />
+                <span className="text-sm font-medium">Pago incompleto (Fiar el resto)</span>
+              </label>
+            </div>
+
+            {/* If Partial Payment is checked, show customer selection/registration */}
+            {isPartialPayment && (
+              <div className="mb-4 p-4 border border-gray-100 dark:border-gray-700 bg-gray-50/50 dark:bg-gray-800/50 rounded-xl space-y-3">
+                {!isOnline && (
+                  <div className="p-3 bg-red-50 dark:bg-red-950/20 rounded-xl text-center">
+                    <span className="text-xs font-bold text-red-500">
+                      ⚠️ El pago incompleto (fiar) requiere conexión a internet.
+                    </span>
+                  </div>
+                )}
+                {isOnline && (
+                  <>
+                    <div>
+                      <label className="block text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-1">
+                        Seleccionar Cliente
+                      </label>
+                      <select
+                        value={partialCustomer ? partialCustomer.id : ''}
+                        onChange={(e) => {
+                          const selectedId = e.target.value;
+                          if (selectedId === '') {
+                            setPartialCustomer(null);
+                            setPartialCedula('');
+                            setPartialNewName('');
+                            setPartialNewPhone('');
+                          } else {
+                            const cust = customers.find((c) => c.id === selectedId);
+                            if (cust) {
+                              setPartialCustomer(cust);
+                              setPartialCedula(cust.cedula);
+                            }
+                          }
+                        }}
+                        className="w-full px-3 py-2 rounded-lg border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-700 text-sm outline-none focus:ring-2 focus:ring-green-500 transition"
+                      >
+                        <option value="">-- Crear cliente nuevo --</option>
+                        {customers.map((c: any) => (
+                          <option key={c.id} value={c.id}>
+                            {c.name} (C.C. {c.cedula})
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+
+                    {!partialCustomer && (
+                      <div className="space-y-2">
+                        <input
+                          type="text"
+                          placeholder="Cédula del cliente *"
+                          required
+                          value={partialCedula}
+                          onChange={(e) => setPartialCedula(e.target.value)}
+                          onBlur={buscarPartialCedula}
+                          className="w-full px-3 py-2 rounded-lg border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-700 text-xs outline-none focus:ring-2 focus:ring-green-500"
+                        />
+                        <input
+                          type="text"
+                          placeholder="Nombre del cliente *"
+                          required
+                          value={partialNewName}
+                          onChange={(e) => setPartialNewName(e.target.value)}
+                          className="w-full px-3 py-2 rounded-lg border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-700 text-xs outline-none focus:ring-2 focus:ring-green-500"
+                        />
+                        <input
+                          type="tel"
+                          placeholder="Teléfono (opcional)"
+                          value={partialNewPhone}
+                          onChange={(e) => setPartialNewPhone(e.target.value)}
+                          className="w-full px-3 py-2 rounded-lg border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-700 text-xs outline-none focus:ring-2 focus:ring-green-500"
+                        />
+                        <p className="text-[10px] text-gray-400">Cliente nuevo — se creará automáticamente</p>
+                      </div>
+                    )}
+
+                    {partialCustomer && (
+                      <div className="p-2 bg-green-50 dark:bg-green-950/20 rounded-lg text-xs space-y-1">
+                        <p><strong>Cliente:</strong> {partialCustomer.name}</p>
+                        <p><strong>Deuda actual:</strong> {formatCurrency(partialCustomer.totalDebt)}</p>
+                      </div>
+                    )}
+                  </>
+                )}
               </div>
+            )}
+
+            {/* Change calculation / Error */}
+            {parseFloat(receivedCashAmount) > 0 && (
+              parseFloat(receivedCashAmount) < cashOrderTotal ? (
+                isPartialPayment ? (
+                  <div className="p-3 bg-blue-50 dark:bg-blue-950/20 rounded-xl flex justify-between items-center mb-4">
+                    <span className="text-sm font-medium text-blue-700 dark:text-blue-400">Restante a fiar:</span>
+                    <span className="text-lg font-bold text-blue-700 dark:text-blue-400">
+                      {formatCurrency(cashOrderTotal - (parseFloat(receivedCashAmount) || 0))}
+                    </span>
+                  </div>
+                ) : (
+                  <div className="p-3 bg-red-50 dark:bg-red-950/20 rounded-xl text-center mb-4">
+                    <span className="text-xs font-bold text-red-500">
+                      El monto es menor al total a pagar
+                    </span>
+                  </div>
+                )
+              ) : (
+                <div className="p-3 bg-green-50 dark:bg-green-950/20 rounded-xl flex justify-between items-center mb-4">
+                  <span className="text-sm font-medium text-green-700 dark:text-green-400">
+                    {isPartialPayment ? "Total cubierto (no se fiará nada):" : "Cambio a devolver:"}
+                  </span>
+                  <span className="text-lg font-bold text-green-700 dark:text-green-400">
+                    {formatCurrency((parseFloat(receivedCashAmount) || 0) - cashOrderTotal)}
+                  </span>
+                </div>
+              )
             )}
 
             {/* Confirm */}
             <button
               onClick={confirmarPagar}
-              disabled={processingCash}
+              disabled={isCashButtonDisabled}
               className="w-full py-3 bg-green-600 text-white rounded-xl font-bold text-sm hover:bg-green-700 transition disabled:opacity-50 flex items-center justify-center gap-2"
             >
               {processingCash ? 'Procesando...' : (
@@ -881,7 +1219,7 @@ export default function VitrinaPage() {
       {/* ═══ Modal Nequi ═══ */}
       {showNequiModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50">
-          <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-full max-w-sm p-6 relative">
+          <div className={`bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-full ${isPartialPayment ? 'max-w-md' : 'max-w-sm'} p-6 relative transition-all duration-300`}>
             <button onClick={() => setShowNequiModal(false)} className="absolute top-4 right-4 p-1"><X size={20} /></button>
 
             {/* Header */}
@@ -896,24 +1234,26 @@ export default function VitrinaPage() {
             </div>
 
             {/* Quick toggle: pay full amount */}
-            <div className="mb-4">
-              <label className="flex items-center gap-3 p-3 bg-gray-50 dark:bg-gray-700 rounded-xl cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={nequiPayingTotal}
-                  onChange={(e) => {
-                    setNequiPayingTotal(e.target.checked);
-                    if (e.target.checked) {
-                      setNequiAmount(nequiOrderTotal.toString());
-                    } else {
-                      setNequiAmount('');
-                    }
-                  }}
-                  className="w-4 h-4 accent-purple-600 rounded"
-                />
-                <span className="text-sm font-medium">Pagar todo por Nequi</span>
-              </label>
-            </div>
+            {!isPartialPayment && (
+              <div className="mb-4">
+                <label className="flex items-center gap-3 p-3 bg-gray-50 dark:bg-gray-700 rounded-xl cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={nequiPayingTotal}
+                    onChange={(e) => {
+                      setNequiPayingTotal(e.target.checked);
+                      if (e.target.checked) {
+                        setNequiAmount(nequiOrderTotal.toString());
+                      } else {
+                        setNequiAmount('');
+                      }
+                    }}
+                    className="w-4 h-4 accent-purple-600 rounded"
+                  />
+                  <span className="text-sm font-medium">Pagar todo por Nequi</span>
+                </label>
+              </div>
+            )}
 
             {/* Nequi amount input */}
             <div className="mb-3">
@@ -934,15 +1274,131 @@ export default function VitrinaPage() {
               </div>
             </div>
 
-            {/* Cash remainder */}
-            {cashAmount > 0 && !nequiPayingTotal && (
-              <div className="p-3 bg-green-50 dark:bg-green-900/20 rounded-xl flex items-center justify-between mb-4">
-                <span className="text-sm flex items-center gap-2 text-green-700 dark:text-green-400">
-                  <Banknote size={16} />
-                  Restante en efectivo
-                </span>
-                <span className="text-lg font-bold text-green-600">{formatCurrency(cashAmount)}</span>
+            {/* Pago Incompleto Checkbox */}
+            <div className="mb-4">
+              <label className="flex items-center gap-3 p-3 bg-gray-50 dark:bg-gray-700 rounded-xl cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={isPartialPayment}
+                  onChange={(e) => {
+                    setIsPartialPayment(e.target.checked);
+                    if (e.target.checked) {
+                      setNequiPayingTotal(false);
+                      if (parseFloat(nequiAmount) >= nequiOrderTotal) {
+                        setNequiAmount('');
+                      }
+                    }
+                  }}
+                  className="w-4 h-4 accent-purple-600 rounded"
+                />
+                <span className="text-sm font-medium">Pago incompleto (Fiar el resto)</span>
+              </label>
+            </div>
+
+            {/* If Partial Payment is checked, show customer selection/registration */}
+            {isPartialPayment && (
+              <div className="mb-4 p-4 border border-gray-100 dark:border-gray-700 bg-gray-50/50 dark:bg-gray-800/50 rounded-xl space-y-3">
+                {!isOnline && (
+                  <div className="p-3 bg-red-50 dark:bg-red-950/20 rounded-xl text-center">
+                    <span className="text-xs font-bold text-red-500">
+                      ⚠️ El pago incompleto (fiar) requiere conexión a internet.
+                    </span>
+                  </div>
+                )}
+                {isOnline && (
+                  <>
+                    <div>
+                      <label className="block text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-1">
+                        Seleccionar Cliente
+                      </label>
+                      <select
+                        value={partialCustomer ? partialCustomer.id : ''}
+                        onChange={(e) => {
+                          const selectedId = e.target.value;
+                          if (selectedId === '') {
+                            setPartialCustomer(null);
+                            setPartialCedula('');
+                            setPartialNewName('');
+                            setPartialNewPhone('');
+                          } else {
+                            const cust = customers.find((c) => c.id === selectedId);
+                            if (cust) {
+                              setPartialCustomer(cust);
+                              setPartialCedula(cust.cedula);
+                            }
+                          }
+                        }}
+                        className="w-full px-3 py-2 rounded-lg border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-700 text-sm outline-none focus:ring-2 focus:ring-purple-500 transition"
+                      >
+                        <option value="">-- Crear cliente nuevo --</option>
+                        {customers.map((c: any) => (
+                          <option key={c.id} value={c.id}>
+                            {c.name} (C.C. {c.cedula})
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+
+                    {!partialCustomer && (
+                      <div className="space-y-2">
+                        <input
+                          type="text"
+                          placeholder="Cédula del cliente *"
+                          required
+                          value={partialCedula}
+                          onChange={(e) => setPartialCedula(e.target.value)}
+                          onBlur={buscarPartialCedula}
+                          className="w-full px-3 py-2 rounded-lg border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-700 text-xs outline-none focus:ring-2 focus:ring-purple-500"
+                        />
+                        <input
+                          type="text"
+                          placeholder="Nombre del cliente *"
+                          required
+                          value={partialNewName}
+                          onChange={(e) => setPartialNewName(e.target.value)}
+                          className="w-full px-3 py-2 rounded-lg border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-700 text-xs outline-none focus:ring-2 focus:ring-purple-500"
+                        />
+                        <input
+                          type="tel"
+                          placeholder="Teléfono (opcional)"
+                          value={partialNewPhone}
+                          onChange={(e) => setPartialNewPhone(e.target.value)}
+                          className="w-full px-3 py-2 rounded-lg border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-700 text-xs outline-none focus:ring-2 focus:ring-purple-500"
+                        />
+                        <p className="text-[10px] text-gray-400">Cliente nuevo — se creará automáticamente</p>
+                      </div>
+                    )}
+
+                    {partialCustomer && (
+                      <div className="p-2 bg-purple-50 dark:bg-purple-950/20 rounded-lg text-xs space-y-1">
+                        <p><strong>Cliente:</strong> {partialCustomer.name}</p>
+                        <p><strong>Deuda actual:</strong> {formatCurrency(partialCustomer.totalDebt)}</p>
+                      </div>
+                    )}
+                  </>
+                )}
               </div>
+            )}
+
+            {/* Remainder display */}
+            {nequiOrderTotal - nequiAmountNum > 0 && !nequiPayingTotal && (
+              isPartialPayment ? (
+                <div className="p-3 bg-blue-50 dark:bg-blue-900/20 rounded-xl flex items-center justify-between mb-4">
+                  <span className="text-sm flex items-center gap-2 text-blue-700 dark:text-blue-400">
+                    <User size={16} />
+                    Restante a fiar
+                  </span>
+                  <span className="text-lg font-bold text-blue-600">{formatCurrency(nequiOrderTotal - nequiAmountNum)}</span>
+                </div>
+              ) : (
+                <div className="p-3 bg-green-50 dark:bg-green-900/20 rounded-xl flex items-center justify-between mb-4">
+                  <span className="text-sm flex items-center gap-2 text-green-700 dark:text-green-400">
+                    <Banknote size={16} />
+                    Restante en efectivo
+                  </span>
+                  <span className="text-lg font-bold text-green-600">{formatCurrency(cashAmount)}</span>
+                </div>
+              )
             )}
 
             {/* Summary */}
@@ -951,22 +1407,29 @@ export default function VitrinaPage() {
                 <span className="text-gray-500 flex items-center gap-1"><Smartphone size={12} /> Nequi</span>
                 <span className="font-bold text-purple-600">{formatCurrency(nequiAmountNum)}</span>
               </div>
-              {cashAmount > 0 && (
-                <div className="flex justify-between text-sm">
-                  <span className="text-gray-500 flex items-center gap-1"><Banknote size={12} /> Efectivo</span>
-                  <span className="font-bold text-green-600">{formatCurrency(cashAmount)}</span>
-                </div>
+              {nequiOrderTotal - nequiAmountNum > 0 && (
+                isPartialPayment ? (
+                  <div className="flex justify-between text-sm">
+                    <span className="text-gray-500 flex items-center gap-1"><User size={12} /> Fiado (Deuda)</span>
+                    <span className="font-bold text-blue-600">{formatCurrency(nequiOrderTotal - nequiAmountNum)}</span>
+                  </div>
+                ) : (
+                  <div className="flex justify-between text-sm">
+                    <span className="text-gray-500 flex items-center gap-1"><Banknote size={12} /> Efectivo</span>
+                    <span className="font-bold text-green-600">{formatCurrency(cashAmount)}</span>
+                  </div>
+                )
               )}
               <div className="border-t border-gray-200 dark:border-gray-600 pt-1 flex justify-between text-sm font-bold">
                 <span>Total</span>
-                <span className="text-salo-orange">{formatCurrency(nequiAmountNum + cashAmount)}</span>
+                <span className="text-salo-orange">{formatCurrency(nequiOrderTotal)}</span>
               </div>
             </div>
 
             {/* Confirm */}
-<button
+            <button
               onClick={confirmarNequi}
-              disabled={processingNequi || nequiAmountNum <= 0 || nequiAmountNum > nequiOrderTotal}
+              disabled={isNequiButtonDisabled}
               className="w-full py-3 bg-purple-600 text-white rounded-xl font-bold text-sm hover:bg-purple-700 transition disabled:opacity-50 flex items-center justify-center gap-2"
             >
               {processingNequi ? 'Procesando...' : (
@@ -984,212 +1447,336 @@ export default function VitrinaPage() {
         </div>
       )}
 
-      {(() => {
-        const filteredCustomers = customers.filter((c) => {
-          const q = customerSearch.toLowerCase().trim();
-          if (!q) return true;
-          return c.name.toLowerCase().includes(q) || c.cedula.includes(q);
-        });
-
-        return (
-          <div className="p-4 md:p-8 max-w-7xl mx-auto">
-            <div className="flex items-center justify-between mb-2">
-              <h1 className="text-2xl font-bold flex items-center gap-2">Vitrina — Cuentas Activas</h1>
-              <div className="flex items-center gap-2">
-                <span className={`flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold ${
-                  isOnline 
-                    ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400' 
-                    : 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400'
-                }`}>
-                  <span className={`w-2 h-2 rounded-full ${isOnline ? 'bg-green-500' : 'bg-red-500 animate-pulse'}`} />
-                  {isOnline ? 'En línea' : 'Sin conexión'}
-                </span>
+      {/* ═══ Modal Abono ═══ */}
+      {showAbonoModal && abonoCustomer && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50">
+          <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-full max-w-sm p-6 relative">
+            <button onClick={() => setShowAbonoModal(false)} className="absolute top-4 right-4 p-1"><X size={20} /></button>
+            <h2 className="text-lg font-bold mb-2">Registrar Abono</h2>
+            <p className="text-sm text-gray-500 mb-4">
+              {abonoCustomer.name} — Deuda: <span className="font-bold text-red-500">{formatCurrency(abonoCustomer.totalDebt)}</span>
+            </p>
+            <div className="mb-3">
+              <label className="text-xs text-gray-500 font-semibold block mb-1">Monto del abono</label>
+              <input
+                type="number"
+                placeholder="Monto"
+                value={abonoAmount}
+                disabled={processingAbono}
+                onChange={(e) => setAbonoAmount(e.target.value)}
+                className="w-full px-4 py-2.5 rounded-xl border border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 disabled:opacity-50"
+                autoFocus
+              />
+            </div>
+            <div className="mb-4">
+              <label className="block text-xs font-semibold text-gray-500 mb-1.5">Método de pago</label>
+              <div className="flex rounded-xl border border-gray-200 dark:border-gray-600 overflow-hidden">
+                <button
+                  type="button"
+                  onClick={() => setAbonoMethod('Efectivo')}
+                  disabled={processingAbono}
+                  className={`flex-1 py-2 text-sm font-medium transition ${
+                    abonoMethod === 'Efectivo'
+                      ? 'bg-green-600 text-white'
+                      : 'bg-gray-50 dark:bg-gray-700 text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-650'
+                  } disabled:opacity-50`}
+                >
+                  Efectivo
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setAbonoMethod('Transferencia')}
+                  disabled={processingAbono}
+                  className={`flex-1 py-2 text-sm font-medium transition ${
+                    abonoMethod === 'Transferencia'
+                      ? 'bg-green-600 text-white'
+                      : 'bg-gray-50 dark:bg-gray-700 text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-650'
+                  } disabled:opacity-50`}
+                >
+                  Transferencia
+                </button>
               </div>
             </div>
-            <p className="text-sm text-gray-500 mb-6">Pedidos entregados esperando pago o fiado.</p>
+            <button
+              onClick={async () => {
+                const amt = parseFloat(abonoAmount);
+                if (!amt || amt <= 0) return;
+                setProcessingAbono(true);
+                try {
+                  await api.post(`/customers/${abonoCustomer.id}/payment`, {
+                    amount: amt,
+                    note: 'Abono desde vitrina',
+                    paymentMethod: abonoMethod,
+                  });
+                  toast.success('Abono registrado con éxito');
+                  setShowAbonoModal(false);
+                  setAbonoAmount('');
+                  setAbonoMethod('Efectivo');
+                  fetchCustomers();
+                  fetchOrders();
+                } catch (e: any) {
+                  toast.error(e.message || 'Error al registrar abono');
+                } finally {
+                  setProcessingAbono(false);
+                }
+              }}
+              disabled={processingAbono || !abonoAmount || parseFloat(abonoAmount) <= 0}
+              className="w-full py-3 bg-orange-500 text-white rounded-xl font-bold text-sm hover:opacity-90 transition disabled:opacity-50 flex items-center justify-center gap-2"
+            >
+              {processingAbono ? 'Registrando...' : 'Confirmar Abono'}
+            </button>
+          </div>
+        </div>
+      )}
 
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-              {/* Cuentas Activas (2/3) */}
-              <div className="lg:col-span-2 space-y-4">
-                <h2 className="text-lg font-extrabold flex items-center gap-2 mb-3">
-                  <Clock className="text-orange-500" size={20} /> Cuentas Activas
-                </h2>
-                {loading ? (
-                  <div className="text-center py-12">Cargando...</div>
-                ) : orders.length === 0 ? (
-                  <div className="text-center py-12 text-gray-400">No hay cuentas activas.</div>
-                ) : (
-                  <div className="space-y-3">
-                    {orders.map((o) => {
-                      const isExpanded = expanded === o.id;
-                      return (
-                        <div key={o.id} className="bg-white dark:bg-gray-800 rounded-xl border dark:border-gray-700 overflow-hidden">
-                          {/* Fila principal */}
-                          <div className="p-4 flex flex-col md:flex-row md:items-center gap-3 justify-between">
-                            <div className="flex items-center gap-3 flex-1">
-                              <button onClick={() => setExpanded(isExpanded ? null : o.id)} className="p-1">
-                                {isExpanded ? <ChevronUp size={18} /> : <ChevronDown size={18} />}
-                              </button>
-                              <div>
-                                <p className="font-bold flex items-center gap-1.5">
-                                  {o.customerName}
-                                  {o.id && o.id.startsWith && o.id.startsWith('local-') && (
-                                    <span className="text-[10px] bg-orange-100 text-orange-700 px-1.5 py-0.5 rounded-full font-semibold">Local (Sin sincronizar)</span>
-                                  )}
-                                </p>
-                                <p className="text-xs text-gray-500">
-                                  {o.type === 'TABLE' ? `Mesa ${o.table?.number || '?'}` : o.type === 'TAKEAWAY' ? 'Para llevar' : 'Domicilio'}
-                                  {' · '}
-                                  <Clock size={12} className="inline" /> {minutosDesde(o.createdAt)} min
-                                </p>
-                              </div>
-                            </div>
-                            <div className="flex items-center gap-2">
-                              <span className="text-lg font-bold text-orange-500">{formatCurrency(o.total)}</span>
-                              {o.status === 'READY' && (
-                                <span className="text-xs px-2 py-1 rounded-full bg-yellow-100 text-yellow-700">Listo</span>
-                              )}
-                              {o.status === 'DELIVERED' && (
-                                <span className="text-xs px-2 py-1 rounded-full bg-blue-100 text-blue-700">Entregado</span>
-                              )}
-                            </div>
-                          </div>
-
-                          {/* Detalle expandido */}
-                          {isExpanded && (
-                            <div className="border-t dark:border-gray-700 px-4 pb-4">
-                              <div className="py-3 space-y-2">
-                                {o.items.map((item) => {
-                                  const canModify = o.id && !o.id.startsWith('local-');
-                                  return (
-                                    <div key={item.id} className="flex items-center justify-between text-sm bg-gray-50 dark:bg-gray-750/30 p-2 rounded-xl">
-                                      <div className="flex-1">
-                                        <span className="font-semibold">{item.qty}x</span> {item.product?.name || 'Producto'}
-                                        <span className="block text-[11px] text-gray-500">{formatCurrency(item.unitPrice)} c/u</span>
-                                      </div>
-                                      <div className="flex items-center gap-3">
-                                        <span className="font-bold text-gray-700 dark:text-gray-300">{formatCurrency(item.unitPrice * item.qty)}</span>
-                                        {canModify && (
-                                          <div className="flex gap-1">
-                                            <button
-                                              onClick={() => handleEditItemPrice(o.id, item.id, item.unitPrice)}
-                                              className="p-1.5 text-gray-400 hover:text-blue-500 hover:bg-blue-50 dark:hover:bg-blue-950/20 rounded-lg transition"
-                                              title="Editar precio"
-                                            >
-                                              <Edit3 size={14} />
-                                            </button>
-                                            <button
-                                              onClick={() => handleRemoveItem(o.id, item.id)}
-                                              className="p-1.5 text-gray-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-950/20 rounded-lg transition"
-                                              title="Eliminar ítem"
-                                            >
-                                              <Trash2 size={14} />
-                                            </button>
-                                          </div>
-                                        )}
-                                      </div>
-                                    </div>
-                                  );
-                                })}
-                                <div className="border-t dark:border-gray-600 pt-2 flex justify-between font-bold">
-                                  <span>Total</span>
-                                  <span>{formatCurrency(o.total)}</span>
-                                </div>
-                              </div>
-                              <div className="flex flex-wrap gap-2 pt-2">
-                                <button onClick={() => abrirCash(o.id, o.total)} className="flex-1 min-w-[100px] py-2 bg-green-500 text-white rounded-lg font-bold text-sm hover:opacity-90 flex items-center justify-center gap-1">
-                                  <DollarSign size={16} /> Efectivo
-                                </button>
-                                <button onClick={() => abrirNequi(o.id, o.total)} className="flex-1 min-w-[100px] py-2 bg-purple-600 text-white rounded-lg font-bold text-sm hover:opacity-90 flex items-center justify-center gap-1">
-                                  <Smartphone size={16} /> Nequi
-                                </button>
-                                <button onClick={() => abrirFiar(o.id, o.total)} className="py-2 px-3 bg-yellow-500 text-white rounded-lg font-bold text-sm hover:opacity-90 flex items-center justify-center gap-1">
-                                  <CreditCard size={16} /> Fiado
-                                </button>
-                                <button onClick={() => abrirEditar(o)} className="py-2 px-3 bg-blue-500 text-white rounded-lg font-bold text-sm hover:opacity-90 flex items-center justify-center gap-1">
-                                  <Edit3 size={16} /> Editar
-                                </button>
-                                <button onClick={() => cancelar(o.id)} className="py-2 px-3 bg-red-500 text-white rounded-lg font-bold text-sm hover:opacity-90 flex items-center justify-center gap-1">
-                                  <Trash2 size={16} />
-                                </button>
-                              </div>
-                            </div>
-                          )}
+      {/* Content grid */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        {/* Cuentas Activas (2/3) */}
+        <div className="lg:col-span-2 space-y-4">
+          <h2 className="text-lg font-extrabold flex items-center gap-2 mb-3">
+            <Clock className="text-orange-500" size={20} /> Cuentas Activas
+          </h2>
+          {loading ? (
+            <div className="text-center py-12">Cargando...</div>
+          ) : orders.length === 0 ? (
+            <div className="text-center py-12 text-gray-400">No hay cuentas activas.</div>
+          ) : (
+            <div className="space-y-3">
+              {orders.map((o) => {
+                const isExpanded = expanded === o.id;
+                return (
+                  <div key={o.id} className="bg-white dark:bg-gray-800 rounded-xl border dark:border-gray-700 overflow-hidden">
+                    {/* Fila principal */}
+                    <div className="p-4 flex flex-col md:flex-row md:items-center gap-3 justify-between">
+                      <div className="flex items-center gap-3 flex-1">
+                        <button onClick={() => setExpanded(isExpanded ? null : o.id)} className="p-1">
+                          {isExpanded ? <ChevronUp size={18} /> : <ChevronDown size={18} />}
+                        </button>
+                        <div>
+                          <p className="font-bold flex items-center gap-1.5">
+                            {o.customerName}
+                            {o.id && o.id.startsWith && o.id.startsWith('local-') && (
+                              <span className="text-[10px] bg-orange-100 text-orange-700 px-1.5 py-0.5 rounded-full font-semibold">Local (Sin sincronizar)</span>
+                            )}
+                          </p>
+                          <p className="text-xs text-gray-500">
+                            {o.type === 'TABLE' ? (o.table?.number === 0 ? 'Recepción' : `Mesa ${o.table?.number || '?'}`) : o.type === 'TAKEAWAY' ? 'Para llevar' : 'Domicilio'}
+                            {' · '}
+                            <Clock size={12} className="inline" /> {minutosDesde(o.createdAt)} min
+                          </p>
                         </div>
-                      );
-                    })}
-                  </div>
-                )}
-              </div>
-
-              {/* Directorio de Deudores (1/3) */}
-              <div className="space-y-4 bg-white dark:bg-gray-800 rounded-3xl p-5 border border-gray-150/40 dark:border-gray-750/70 shadow-xs h-[fit-content]">
-                <div>
-                  <h2 className="text-lg font-extrabold flex items-center gap-2">
-                    <DollarSign className="text-red-500" size={20} /> Clientes y Deudas
-                  </h2>
-                  <p className="text-xs text-gray-500">Consulta saldos y registra abonos en tiempo real</p>
-                </div>
-
-                <div className="relative">
-                  <Search className="absolute left-3 top-2.5 text-gray-400" size={16} />
-                  <input
-                    type="text"
-                    placeholder="Buscar por nombre o cédula..."
-                    value={customerSearch}
-                    onChange={(e) => setCustomerSearch(e.target.value)}
-                    className="w-full pl-9 pr-4 py-2 rounded-xl border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-750 text-xs outline-none focus:ring-2 focus:ring-orange-500 transition"
-                  />
-                </div>
-
-                <div className="space-y-2 max-h-[400px] overflow-y-auto pr-1">
-                  {filteredCustomers.length === 0 ? (
-                    <p className="text-xs text-gray-400 text-center py-6">No se encontraron clientes.</p>
-                  ) : (
-                    filteredCustomers.map((c: any) => (
-                      <div key={c.id} className="p-3 bg-gray-50 dark:bg-gray-750/30 rounded-2xl flex items-center justify-between border border-gray-100/50 dark:border-gray-700/50">
-                        <div className="min-w-0 flex-1 mr-2">
-                          <p className="font-extrabold text-xs text-gray-800 dark:text-gray-200 truncate">{c.name}</p>
-                          <p className="text-[10px] text-gray-500 truncate">C.C. {c.cedula} {c.phone ? `· Cel. ${c.phone}` : ''}</p>
-                          {c.totalDebt > 0 ? (
-                            <p className="text-xs font-black text-red-500 mt-1">Debe: {formatCurrency(c.totalDebt)}</p>
-                          ) : (
-                            <p className="text-xs text-green-500 mt-1">Sin deudas</p>
-                          )}
-                        </div>
-                        {c.totalDebt > 0 && (
-                          <button
-                            onClick={async () => {
-                              const abono = prompt(`Registrar abono para ${c.name} (Deuda actual: ${formatCurrency(c.totalDebt)}):`);
-                              if (abono === null || isNaN(Number(abono))) return;
-                              const amt = Number(abono);
-                              if (amt <= 0) {
-                                alert('Monto inválido');
-                                return;
-                              }
-                              try {
-                                await api.post(`/customers/${c.id}/payment`, { amount: amt, note: 'Abono desde vitrina' });
-                                toast.success('Abono registrado con éxito');
-                                fetchCustomers();
-                                fetchOrders();
-                              } catch (e: any) {
-                                toast.error(e.message || 'Error al registrar abono');
-                              }
-                            }}
-                            className="px-2.5 py-1.5 bg-orange-500 hover:bg-orange-600 text-white rounded-lg font-bold text-[10px] shadow-sm transition shrink-0"
-                          >
-                            Abonar
-                          </button>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <span className="text-lg font-bold text-orange-500">{formatCurrency(o.total)}</span>
+                        {o.status === 'READY' && (
+                          <span className="text-xs px-2 py-1 rounded-full bg-yellow-100 text-yellow-700">Listo</span>
+                        )}
+                        {o.status === 'DELIVERED' && (
+                          <span className="text-xs px-2 py-1 rounded-full bg-blue-100 text-blue-700">Entregado</span>
                         )}
                       </div>
-                    ))
-                  )}
-                </div>
-              </div>
+                    </div>
+
+                    {/* Detalle expandido */}
+                    {isExpanded && (
+                      <div className="border-t dark:border-gray-700 px-4 pb-4">
+                        <div className="py-3 space-y-2">
+                          {o.items.map((item) => {
+                            const canModify = o.id && !o.id.startsWith('local-');
+                            return (
+                              <div key={item.id} className="flex items-center justify-between text-sm bg-gray-50 dark:bg-gray-750/30 p-2 rounded-xl">
+                                <div className="flex-1">
+                                  <span className="font-semibold">{item.qty}x</span> {item.product?.name || 'Producto'}
+                                  <span className="block text-[11px] text-gray-500">{formatCurrency(item.unitPrice)} c/u</span>
+                                </div>
+                                <div className="flex items-center gap-3">
+                                  <span className="font-bold text-gray-700 dark:text-gray-300">{formatCurrency(item.unitPrice * item.qty)}</span>
+                                  {canModify && (
+                                    <div className="flex gap-1">
+                                      <button
+                                        onClick={() => handleEditItemPrice(o.id, item.id, item.unitPrice)}
+                                        className="p-1.5 text-gray-400 hover:text-blue-500 hover:bg-blue-50 dark:hover:bg-blue-950/20 rounded-lg transition"
+                                        title="Editar precio"
+                                      >
+                                        <Edit3 size={14} />
+                                      </button>
+                                      <button
+                                        onClick={() => handleRemoveItem(o.id, item.id)}
+                                        className="p-1.5 text-gray-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-950/20 rounded-lg transition"
+                                        title="Eliminar ítem"
+                                      >
+                                        <Trash2 size={14} />
+                                      </button>
+                                    </div>
+                                  )}
+                                </div>
+                              </div>
+                            );
+                          })}
+                          <div className="border-t dark:border-gray-600 pt-2 flex justify-between font-bold">
+                            <span>Total</span>
+                            <span>{formatCurrency(o.total)}</span>
+                          </div>
+                        </div>
+                        <div className="flex flex-wrap gap-2 pt-2">
+                          <button onClick={() => abrirCash(o.id, o.total)} className="flex-1 min-w-[100px] py-2 bg-green-500 text-white rounded-lg font-bold text-sm hover:opacity-90 flex items-center justify-center gap-1">
+                            <DollarSign size={16} /> Efectivo
+                          </button>
+                          <button onClick={() => abrirNequi(o.id, o.total)} className="flex-1 min-w-[100px] py-2 bg-purple-600 text-white rounded-lg font-bold text-sm hover:opacity-90 flex items-center justify-center gap-1">
+                            <Smartphone size={16} /> Nequi
+                          </button>
+                          <button onClick={() => abrirFiar(o.id, o.total)} className="py-2 px-3 bg-yellow-500 text-white rounded-lg font-bold text-sm hover:opacity-90 flex items-center justify-center gap-1">
+                            <CreditCard size={16} /> Fiado
+                          </button>
+                          <button onClick={() => abrirEditar(o)} className="py-2 px-3 bg-blue-500 text-white rounded-lg font-bold text-sm hover:opacity-90 flex items-center justify-center gap-1">
+                            <Edit3 size={16} /> Editar
+                          </button>
+                          <button onClick={() => cancelar(o.id)} className="py-2 px-3 bg-red-500 text-white rounded-lg font-bold text-sm hover:opacity-90 flex items-center justify-center gap-1">
+                            <Trash2 size={16} />
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
             </div>
+          )}
+        </div>
+
+      {/* Right Column / Sidebar (1/3) */}
+      <div className="space-y-6">
+        {/* Directorio de Deudores */}
+        <div className="space-y-4 bg-white dark:bg-gray-800 rounded-3xl p-5 border border-gray-150/40 dark:border-gray-750/70 shadow-xs h-[fit-content]">
+          <div>
+            <h2 className="text-lg font-extrabold flex items-center gap-2">
+              <DollarSign className="text-red-500" size={20} /> Clientes y Deudas
+            </h2>
+            <p className="text-xs text-gray-500">Consulta saldos y registra abonos en tiempo real</p>
           </div>
-        );
-      })()}
+
+          <div className="relative">
+            <Search className="absolute left-3 top-2.5 text-gray-400" size={16} />
+            <input
+              type="text"
+              placeholder="Buscar por nombre o cédula..."
+              value={customerSearch}
+              onChange={(e) => setCustomerSearch(e.target.value)}
+              className="w-full pl-9 pr-4 py-2 rounded-xl border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-755 text-xs outline-none focus:ring-2 focus:ring-orange-500 transition"
+            />
+          </div>
+
+          <div className="space-y-2 max-h-[300px] overflow-y-auto pr-1">
+            {filteredCustomers.length === 0 ? (
+              <p className="text-xs text-gray-400 text-center py-6">No se encontraron clientes.</p>
+            ) : (
+              filteredCustomers.map((c: any) => (
+                <div key={c.id} className="p-3 bg-gray-50 dark:bg-gray-750/30 rounded-2xl flex items-center justify-between border border-gray-100/50 dark:border-gray-700/50">
+                  <div className="min-w-0 flex-1 mr-2">
+                    <p className="font-extrabold text-xs text-gray-800 dark:text-gray-200 truncate">{c.name}</p>
+                    <p className="text-[10px] text-gray-500 truncate">C.C. {c.cedula} {c.phone ? `· Cel. ${c.phone}` : ''}</p>
+                    {c.totalDebt > 0 ? (
+                      <p className="text-xs font-black text-red-500 mt-1">Debe: {formatCurrency(c.totalDebt)}</p>
+                    ) : (
+                      <p className="text-xs text-green-500 mt-1">Sin deudas</p>
+                    )}
+                  </div>
+                    {c.totalDebt > 0 && (
+                      <button
+                        onClick={() => {
+                          setAbonoCustomer(c);
+                          setAbonoAmount('');
+                          setAbonoMethod('Efectivo');
+                          setShowAbonoModal(true);
+                        }}
+                        className="px-2.5 py-1.5 bg-orange-500 hover:bg-orange-600 text-white rounded-lg font-bold text-[10px] shadow-sm transition shrink-0"
+                      >
+                        Abonar
+                      </button>
+                    )}
+                </div>
+              ))
+            )}
+          </div>
+        </div>
+
+        {/* Ventas del Día */}
+        <div className="space-y-4 bg-white dark:bg-gray-800 rounded-3xl p-5 border border-gray-150/40 dark:border-gray-750/70 shadow-xs h-[fit-content]">
+          <div>
+            <h2 className="text-lg font-extrabold flex items-center gap-2">
+              <Banknote className="text-green-500" size={20} /> Ventas del Día
+            </h2>
+            <p className="text-xs text-gray-500">Historial de ventas finalizadas</p>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <input
+              type="date"
+              value={salesDate}
+              onChange={(e) => setSalesDate(e.target.value)}
+              className="w-full px-3 py-1.5 rounded-xl border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-755 text-xs outline-none focus:ring-2 focus:ring-green-500 transition"
+            />
+          </div>
+
+          <div className="space-y-2 max-h-[350px] overflow-y-auto pr-1">
+            {salesLoading ? (
+              <p className="text-xs text-gray-400 text-center py-6">Cargando ventas...</p>
+            ) : dailySales.length === 0 ? (
+              <p className="text-xs text-gray-400 text-center py-6">No hay ventas registradas para este día.</p>
+            ) : (
+              dailySales.map((sale) => {
+                const isExpanded = !!expandedSales[sale.id];
+                return (
+                  <div key={sale.id} className="p-3 bg-gray-50 dark:bg-gray-750/30 rounded-2xl border border-gray-100/50 dark:border-gray-700/50">
+                    <div className="flex justify-between items-start">
+                      <div className="min-w-0 flex-1">
+                        <p className="font-extrabold text-xs text-gray-800 dark:text-gray-200 truncate">{sale.customerName}</p>
+                        <p className="text-[10px] text-gray-500 flex flex-wrap gap-1">
+                          <span>
+                            {sale.type === 'TABLE' ? (sale.table?.number === 0 ? 'Recepción' : `Mesa ${sale.table?.number || '?'}`) : sale.type === 'TAKEAWAY' ? 'Para llevar' : 'Domicilio'}
+                          </span>
+                          <span>·</span>
+                          <span>
+                            {new Date(sale.createdAt).toLocaleTimeString('es-CO', { hour: '2-digit', minute: '2-digit', hour12: true })}
+                          </span>
+                        </p>
+                      </div>
+                      <div className="text-right ml-2 shrink-0">
+                        <p className="text-xs font-black text-green-600">{formatCurrency(sale.total)}</p>
+                        <button
+                          onClick={() => setExpandedSales({ ...expandedSales, [sale.id]: !isExpanded })}
+                          className="text-[10px] text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 font-bold flex items-center gap-0.5 ml-auto mt-1"
+                        >
+                          {isExpanded ? 'Ocultar' : 'Detalles'} {isExpanded ? <ChevronUp size={10} /> : <ChevronDown size={10} />}
+                        </button>
+                      </div>
+                    </div>
+
+                    {isExpanded && (
+                      <div className="mt-2 pt-2 border-t border-gray-200/50 dark:border-gray-750/50 space-y-1 bg-gray-50/50 dark:bg-gray-800/50 p-2 rounded-xl">
+                        <div className="flex justify-between text-[10px] font-bold text-gray-500 mb-1">
+                          <span>Método de pago:</span>
+                          <span className={sale.paymentStatus === 'FIADO' ? 'text-yellow-600 font-extrabold' : 'text-green-600 font-extrabold'}>
+                            {getOrderPaymentMethodsText(sale)}
+                          </span>
+                        </div>
+                        <div className="border-t border-dashed border-gray-200 dark:border-gray-700 my-1"></div>
+                        {sale.items.map((item) => (
+                          <div key={item.id} className="flex justify-between text-[11px] text-gray-550 dark:text-gray-400">
+                            <span>{item.qty}x {item.product?.name}</span>
+                            <span>{formatCurrency(item.unitPrice * item.qty)}</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                );
+              })
+            )}
+          </div>
+        </div>
+      </div>
+      </div>
     </div>
   );
 }

@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { Bike, Clock, CheckCircle, Package, Truck, Search, ChevronDown, ChevronUp } from 'lucide-react';
 import { getSocket, joinRoom } from '@/lib/socket';
+import { formatErrorMessage } from '@/lib/error-handler';
 
 interface OrderItem {
   id: string;
@@ -90,7 +91,7 @@ export default function SeguirPedidoClient() {
         setExpandedOrderId(null);
       }
     } catch (err: any) {
-      setError(err.message || 'Error al buscar los pedidos');
+      setError(formatErrorMessage(err, 'Error al buscar los pedidos'));
       setOrders([]);
     } finally {
       setLoading(false);

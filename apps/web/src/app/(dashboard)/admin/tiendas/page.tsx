@@ -15,7 +15,8 @@ import {
   Activity,
   Award,
   ShieldAlert,
-  Percent
+  Percent,
+  Trash2
 } from 'lucide-react';
 
 interface StoreAdminData {
@@ -26,7 +27,7 @@ interface StoreAdminData {
   bannerUrl: string | null;
   whatsappNumber: string;
   category: string;
-  plan: 'FREE' | 'PRO';
+  plan: 'FREE' | 'PRO' | 'PREMIUM';
   planExpiresAt: string;
   commissionRate: number;
   balance: number;
@@ -46,13 +47,11 @@ export default function AdminStoresPage() {
   const [showRechargeModal, setShowRechargeModal] = useState(false);
   const [selectedStore, setSelectedStore] = useState<StoreAdminData | null>(null);
   const [rechargeAmount, setRechargeAmount] = useState('');
-
   // Edit store modal states
   const [showEditModal, setShowEditModal] = useState(false);
   const [editStoreData, setEditStoreData] = useState<{
     id: string;
-    plan: 'FREE' | 'PRO';
-    commissionRate: number;
+    plan: 'FREE' | 'PRO' | 'PREMIUM';
   } | null>(null);
 
   useEffect(() => {
@@ -80,34 +79,12 @@ export default function AdminStoresPage() {
     }
   };
 
-  const handleOpenRecharge = (store: StoreAdminData) => {
-    setSelectedStore(store);
-    setRechargeAmount('');
-    setShowRechargeModal(true);
-  };
 
-  const handleRechargeSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!selectedStore || !rechargeAmount || Number(rechargeAmount) <= 0) {
-      toast.error('Monto de recarga inválido');
-      return;
-    }
-
-    try {
-      await api.post(`/stores/${selectedStore.id}/recharge`, { amount: Number(rechargeAmount) });
-      toast.success(`Saldo recargado con éxito en ${selectedStore.name}`);
-      setShowRechargeModal(false);
-      loadStores();
-    } catch (err: any) {
-      toast.error(err.message || 'Error al recargar saldo');
-    }
-  };
 
   const handleOpenEdit = (store: StoreAdminData) => {
     setEditStoreData({
       id: store.id,
       plan: store.plan,
-      commissionRate: store.commissionRate,
     });
     setSelectedStore(store);
     setShowEditModal(true);
@@ -120,13 +97,29 @@ export default function AdminStoresPage() {
     try {
       await api.put(`/stores/${editStoreData.id}`, {
         plan: editStoreData.plan,
-        commissionRate: Number(editStoreData.commissionRate),
       });
       toast.success(`Planes actualizados para ${selectedStore.name}`);
       setShowEditModal(false);
       loadStores();
     } catch (err: any) {
       toast.error(err.message || 'Error al actualizar planes');
+    }
+  };
+
+  const handleDeleteStore = async (store: StoreAdminData) => {
+    if (store.name === 'Donde Salo!') {
+      toast.error('No se puede eliminar la tienda oficial del administrador.');
+      return;
+    }
+    if (!confirm(`¿Estás seguro de eliminar la tienda "${store.name}"? Esta acción es irreversible y eliminará todos sus productos y pedidos.`)) {
+      return;
+    }
+    try {
+      await api.delete(`/stores/${store.id}`);
+      toast.success('Tienda eliminada con éxito');
+      loadStores();
+    } catch (err: any) {
+      toast.error(err.message || 'Error al eliminar la tienda');
     }
   };
 
@@ -152,7 +145,7 @@ export default function AdminStoresPage() {
     <div className="space-y-6 font-sans pb-12">
       <div className="border-b border-gray-100 dark:border-gray-800 pb-5">
         <h1 className="text-2xl font-black">Aceptaciones de Tiendas</h1>
-        <p className="text-sm text-gray-500">Supervisa planes, aprueba comercios y administra saldos del marketplace</p>
+        <p className="text-sm text-gray-500">Supervisa planes y aprueba comercios del marketplace</p>
       </div>
 
       <div className="bg-white dark:bg-gray-800/60 border border-gray-150/40 dark:border-gray-700/60 rounded-3xl overflow-x-auto shadow-sm">
@@ -162,7 +155,6 @@ export default function AdminStoresPage() {
               <th className="py-4 px-6">Tienda / Propietario</th>
               <th className="py-4 px-6">Categoría</th>
               <th className="py-4 px-6">Suscripción</th>
-              <th className="py-4 px-6">Saldo</th>
               <th className="py-4 px-6">Estado</th>
               <th className="py-4 px-6 text-right">Acciones</th>
             </tr>
@@ -190,20 +182,15 @@ export default function AdminStoresPage() {
                   </span>
                 </td>
 
-                <td className="py-4 px-6 space-y-0.5">
                   <span className={`inline-flex px-2 py-0.5 rounded-md text-[10px] font-black uppercase ${
-                    store.plan === 'PRO'
+                    store.plan === 'PREMIUM'
+                      ? 'bg-blue-100 dark:bg-blue-950/40 text-blue-600 dark:text-blue-400'
+                      : store.plan === 'PRO'
                       ? 'bg-purple-100 dark:bg-purple-950/40 text-purple-600 dark:text-purple-400'
                       : 'bg-orange-100 dark:bg-orange-950/40 text-orange-600 dark:text-orange-400'
                   }`}>
                     PLAN {store.plan}
                   </span>
-                  <p className="text-[10px] text-gray-400 font-medium">Comisión: {(store.commissionRate * 100)}%</p>
-                </td>
-
-                <td className="py-4 px-6">
-                  <p className="font-extrabold text-sm text-gray-800 dark:text-gray-200">{formatCurrency(store.balance)}</p>
-                </td>
 
                 <td className="py-4 px-6">
                   <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold ${
@@ -216,13 +203,6 @@ export default function AdminStoresPage() {
                 </td>
 
                 <td className="py-4 px-6 text-right space-x-1">
-                  <button
-                    onClick={() => handleOpenRecharge(store)}
-                    className="p-2 text-gray-500 hover:text-green-500 hover:bg-green-50 dark:hover:bg-green-950/20 rounded-xl transition inline-flex"
-                    title="Recargar Saldo"
-                  >
-                    <DollarSign size={16} />
-                  </button>
                   <button
                     onClick={() => handleOpenEdit(store)}
                     className="p-2 text-gray-500 hover:text-purple-500 hover:bg-purple-50 dark:hover:bg-purple-950/20 rounded-xl transition inline-flex"
@@ -240,6 +220,15 @@ export default function AdminStoresPage() {
                   >
                     {store.active ? 'Desactivar' : 'Activar'}
                   </button>
+                  {store.name !== 'Donde Salo!' && (
+                    <button
+                      onClick={() => handleDeleteStore(store)}
+                      className="p-2 text-gray-500 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-950/20 rounded-xl transition inline-flex align-middle"
+                      title="Eliminar Tienda"
+                    >
+                      <Trash2 size={16} />
+                    </button>
+                  )}
                 </td>
               </tr>
             ))}
@@ -247,56 +236,12 @@ export default function AdminStoresPage() {
         </table>
       </div>
 
-      {/* Recharge Modal */}
-      {showRechargeModal && selectedStore && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-          <div className="absolute inset-0 bg-black/60 backdrop-blur-xs" onClick={() => setShowRechargeModal(false)} />
-          <div className="relative w-full max-w-sm bg-white dark:bg-gray-800 rounded-3xl shadow-2xl p-6">
-            <h3 className="text-lg font-black mb-1">Recargar Saldo</h3>
-            <p className="text-xs text-gray-400 font-medium mb-4">Añade saldo manual a la tienda "{selectedStore.name}"</p>
-            
-            <form onSubmit={handleRechargeSubmit} className="space-y-4">
-              <div>
-                <label className="block text-xs font-extrabold uppercase text-gray-400 tracking-wider mb-1">Monto en COP *</label>
-                <div className="relative">
-                  <DollarSign size={18} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-gray-450" />
-                  <input
-                    type="number"
-                    required
-                    min={1}
-                    placeholder="Ej: 50000"
-                    value={rechargeAmount}
-                    onChange={(e) => setRechargeAmount(e.target.value)}
-                    className="w-full pl-11 pr-4 py-3 rounded-xl border border-gray-200 dark:border-gray-750 bg-gray-50 dark:bg-gray-750 text-sm outline-none focus:ring-2 focus:ring-orange-400 transition"
-                  />
-                </div>
-              </div>
-              <div className="flex gap-3 pt-2">
-                <button
-                  type="button"
-                  onClick={() => setShowRechargeModal(false)}
-                  className="w-1/3 py-3 bg-gray-100 hover:bg-gray-200 dark:bg-gray-700 dark:hover:bg-gray-650 rounded-xl font-bold transition text-sm text-gray-750 dark:text-gray-200"
-                >
-                  Cancelar
-                </button>
-                <button
-                  type="submit"
-                  className="w-2/3 py-3 bg-green-500 hover:bg-green-600 text-white rounded-xl font-bold transition text-sm shadow-md"
-                >
-                  Realizar Recarga
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-
       {/* Edit Store Modal */}
       {showEditModal && editStoreData && selectedStore && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
           <div className="absolute inset-0 bg-black/60 backdrop-blur-xs" onClick={() => setShowEditModal(false)} />
-          <div className="relative w-full max-w-sm bg-white dark:bg-gray-800 rounded-3xl shadow-2xl p-6">
-            <h3 className="text-lg font-black mb-1">Editar Plan y Comisión</h3>
+          <div className="relative w-full max-w-sm bg-white dark:bg-gray-850 rounded-3xl shadow-2xl p-6">
+            <h3 className="text-lg font-black mb-1">Editar Plan</h3>
             <p className="text-xs text-gray-400 font-medium mb-4">Actualiza las condiciones de "{selectedStore.name}"</p>
             
             <form onSubmit={handleEditSubmit} className="space-y-4">
@@ -309,24 +254,8 @@ export default function AdminStoresPage() {
                 >
                   <option value="FREE">Plan Básico (FREE)</option>
                   <option value="PRO">Plan Profesional (PRO)</option>
+                  <option value="PREMIUM">Plan Chatbot IA (PREMIUM)</option>
                 </select>
-              </div>
-
-              <div>
-                <label className="block text-xs font-extrabold uppercase text-gray-400 tracking-wider mb-1">Tasa de Comisión (Decimal, ej: 0.04 para 4%)</label>
-                <div className="relative">
-                  <Percent size={16} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-gray-450" />
-                  <input
-                    type="number"
-                    step="0.01"
-                    min="0"
-                    max="1"
-                    placeholder="Ej: 0.04"
-                    value={editStoreData.commissionRate}
-                    onChange={(e) => setEditStoreData({ ...editStoreData, commissionRate: Number(e.target.value) })}
-                    className="w-full pl-11 pr-4 py-3 rounded-xl border border-gray-200 dark:border-gray-750 bg-gray-50 dark:bg-gray-750 text-sm outline-none focus:ring-2 focus:ring-orange-400 transition"
-                  />
-                </div>
               </div>
 
               <div className="flex gap-3 pt-2">

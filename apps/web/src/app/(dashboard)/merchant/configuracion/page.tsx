@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { toast } from 'sonner';
 import { api } from '@/lib/api';
+import Link from 'next/link';
 import {
   Settings,
   Store,
@@ -22,7 +23,7 @@ interface StoreDetails {
   bannerUrl: string | null;
   whatsappNumber: string;
   category: string;
-  plan: 'FREE' | 'PRO';
+  plan: 'FREE' | 'PRO' | 'PREMIUM';
   planExpiresAt: string;
   commissionRate: number;
   balance: number;
@@ -159,12 +160,27 @@ export default function MerchantConfigurationPage() {
 
   return (
     <div className="max-w-xl mx-auto pb-12 font-sans">
-      <div className="flex items-center gap-3 border-b border-gray-100 dark:border-gray-800 pb-5 mb-6">
+      <div className="flex items-center gap-3 border-b border-gray-100 dark:border-gray-800 pb-5 mb-5">
         <Settings className="text-orange-500" size={24} />
         <div>
           <h1 className="text-2xl font-black">Personalizar Tienda</h1>
           <p className="text-xs text-gray-500 mt-0.5">Configura la información pública y la identidad de tu comercio</p>
         </div>
+      </div>
+
+      <div className="flex gap-6 border-b border-gray-150 dark:border-gray-750 pb-px mb-6 text-sm font-semibold">
+        <button
+          type="button"
+          className="border-b-2 border-orange-500 pb-3 text-orange-500 font-bold px-1 outline-none"
+        >
+          General
+        </button>
+        <Link
+          href="/merchant/configuracion/chatbot"
+          className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 pb-3 px-1 transition"
+        >
+          Chatbot IA 🤖
+        </Link>
       </div>
 
       <form onSubmit={handleSubmit} className="space-y-5">

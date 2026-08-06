@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { useParams } from 'next/navigation';
 import { toast } from 'sonner';
 import { cn, formatCurrency } from '@/lib/utils';
+import { formatErrorMessage } from '@/lib/error-handler';
 import { getSocket } from '@/lib/socket';
 import {
   ShoppingCart,
@@ -57,6 +58,15 @@ const STATUS_LABELS: Record<string, { label: string; icon: React.ElementType; co
   PAID: { label: 'Pagado', icon: CheckCircle2, color: 'text-green-600', bg: 'bg-green-50' },
 };
 
+const METHOD_LABELS: Record<string, string> = {
+  CASH: 'Efectivo',
+  NEQUI: 'Nequi',
+  BANCOLOMBIA: 'Bancolombia',
+  DAVIPLATA: 'Daviplata',
+  TRANSFER: 'Transferencia',
+  BREB: 'Breb',
+};
+
 export default function MesaPage() {
   const params = useParams();
   const token = params.token as string;
@@ -64,6 +74,7 @@ export default function MesaPage() {
   const [products, setProducts] = useState<Product[]>([]);
   const [table, setTable] = useState<{ id: string; number: number } | null>(null);
   const [paymentMethods, setPaymentMethods] = useState<PaymentMethodConfig[]>([]);
+  const [selectedPaymentMethod, setSelectedPaymentMethod] = useState<string>('CASH');
   const [cart, setCart] = useState<CartItem[]>([]);
   const [customerName, setCustomerName] = useState('');
   const [loading, setLoading] = useState(true);
@@ -99,7 +110,7 @@ export default function MesaPage() {
       setTable(data.table);
       setPaymentMethods(data.paymentMethods);
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : 'Error cargando menú');
+      setError(formatErrorMessage(err, 'Error cargando menú'));
     } finally {
       setLoading(false);
     }
@@ -151,16 +162,20 @@ export default function MesaPage() {
           tableId: table?.id,
           customerName,
           items: cart.map((i) => ({ productId: i.product.id, qty: i.qty, notes: i.notes || undefined })),
+          notes: `Método de pago: ${METHOD_LABELS[selectedPaymentMethod] || selectedPaymentMethod}`,
         }),
       });
-      if (!res.ok) throw new Error('Error creando pedido');
+      if (!res.ok) {
+        const errJson = await res.json().catch(() => ({}));
+        throw new Error(errJson.message || `Error ${res.status}`);
+      }
       const data = await res.json();
       setOrder(data);
       setCart([]);
       setShowCart(false);
       toast.success('¡Pedido enviado!');
     } catch (err: unknown) {
-      toast.error(err instanceof Error ? err.message : 'Error');
+      toast.error(formatErrorMessage(err, 'No se pudo enviar el pedido'));
     } finally {
       setSubmitting(false);
     }
@@ -209,7 +224,7 @@ export default function MesaPage() {
               <Flame size={32} className="text-white" />
             </div>
             <h1 className="text-xl font-extrabold text-gray-800 mb-0.5">Vamos Donde Salo!</h1>
-            <p className="text-sm text-gray-400 font-medium mb-8">Mesa {table?.number}</p>
+            <p className="text-sm text-gray-400 font-medium mb-8">{table?.number === 0 ? 'Recepción' : `Mesa ${table?.number}`}</p>
 
             {/* Status badge */}
             <div className={cn('inline-flex flex-col items-center gap-3 px-8 py-5 rounded-2xl mb-8', statusInfo.bg)}>
@@ -268,7 +283,7 @@ export default function MesaPage() {
               </div>
               <div>
                 <h1 className="font-extrabold text-white text-base leading-tight">Vamos Donde Salo!</h1>
-                <p className="text-[11px] text-white/70 font-medium">Mesa {table?.number} · Menú digital</p>
+                <p className="text-[11px] text-white/70 font-medium">{table?.number === 0 ? 'Recepción' : `Mesa ${table?.number}`} · Menú digital</p>
               </div>
             </div>
             {cartCount > 0 && (
@@ -458,6 +473,73 @@ export default function MesaPage() {
                   />
                 </div>
               </div>
+
+              {/* Payment Method Selector */}
+              <div className="mt-6 space-y-3">
+                <label className="text-xs font-semibold text-gray-450 uppercase tracking-wider block">Método de pago</label>
+                <div className="grid grid-cols-2 gap-2">
+                  {paymentMethods && paymentMethods.length > 0 ? (
+                    paymentMethods.map((m) => {
+                      const isSelected = selectedPaymentMethod === m.method;
+                      return (
+                        <button
+                          key={m.method}
+                          type="button"
+                          onClick={() => setSelectedPaymentMethod(m.method)}
+                          className={`p-3 rounded-2xl border text-left font-bold text-xs transition-all flex flex-col gap-0.5 relative overflow-hidden ${
+                            isSelected
+                              ? 'border-salo-orange bg-salo-orange text-white shadow-sm'
+                              : 'border-gray-200 bg-gray-50 text-gray-700 hover:bg-gray-100'
+                          }`}
+                        >
+                          <span className="font-bold truncate">{METHOD_LABELS[m.method] || m.method}</span>
+                          {m.key && (
+                            <span className={`text-[9px] font-medium truncate ${isSelected ? 'text-orange-100' : 'text-gray-400'}`}>
+                              {m.key}
+                            </span>
+                          )}
+                        </button>
+                      );
+                    })
+                  ) : (
+                    <div className="col-span-2 p-3 rounded-2xl border border-gray-100 text-center text-xs text-gray-400">
+                      Cargando métodos de pago...
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* QR Display for Transfers / Nequi Alert */}
+              {selectedPaymentMethod !== 'CASH' && (
+                <div className="mt-4 bg-gray-50 border border-gray-150 rounded-2xl p-4 flex flex-col items-center justify-center space-y-3">
+                  <p className="text-[11px] font-bold text-gray-500 text-center">
+                    Escanea el código QR para transferir
+                  </p>
+                  {paymentMethods.find((m) => m.method === selectedPaymentMethod)?.qrUrl ? (
+                    <img
+                      src={paymentMethods.find((m) => m.method === selectedPaymentMethod)?.qrUrl || undefined}
+                      alt={`QR ${selectedPaymentMethod}`}
+                      className="w-40 h-40 object-contain rounded-xl border bg-white shadow-sm"
+                    />
+                  ) : (
+                    <div className="w-40 h-40 flex items-center justify-center rounded-xl border bg-white text-gray-400 text-xs text-center p-3">
+                      Sin código QR
+                    </div>
+                  )}
+                  {paymentMethods.find((m) => m.method === selectedPaymentMethod)?.key && (
+                    <p className="text-xs font-bold text-center text-gray-700">
+                      Número / Referencia: {paymentMethods.find((m) => m.method === selectedPaymentMethod)?.key}
+                    </p>
+                  )}
+                  {selectedPaymentMethod === 'NEQUI' && (
+                    <div className="p-2.5 bg-purple-50 border border-purple-100 rounded-xl text-center w-full">
+                      <span className="text-[10px] font-bold text-purple-700 block">
+                        📢 Muéstrale al vendedor el comprobante para recibir tu pedido
+                      </span>
+                    </div>
+                  )}
+                </div>
+              )}
 
               {/* Total */}
               <div className="mt-5 bg-gradient-to-r from-orange-50 to-amber-50 rounded-2xl p-5">

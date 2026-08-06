@@ -33,9 +33,9 @@ export class MerchantPlanGuard implements CanActivate {
       throw new ForbiddenException('La tienda asociada no existe');
     }
 
-    // If the plan is not PRO, throw Forbidden
-    if (store.plan !== 'PRO') {
-      throw new ForbiddenException('Esta funcionalidad está disponible únicamente en el Plan PRO');
+    // If the plan is FREE, throw Forbidden
+    if (store.plan === 'FREE') {
+      throw new ForbiddenException('Esta funcionalidad está disponible únicamente en planes PRO y superiores');
     }
 
     // Attach storeId to request for service filters

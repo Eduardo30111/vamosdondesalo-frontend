@@ -35,7 +35,7 @@ interface Store {
   bannerUrl: string | null;
   whatsappNumber: string;
   category: string;
-  plan: 'FREE' | 'PRO';
+  plan: 'FREE' | 'PRO' | 'PREMIUM';
   planExpiresAt: string;
   commissionRate: number;
   balance: number;
@@ -106,27 +106,11 @@ export default function MerchantDashboard() {
   const totalSalesToday = todayOrders.reduce((sum, o) => sum + o.total, 0);
   const ordersTodayCount = todayOrders.length;
   
-  // Commission deduction calculation
-  const totalCommissionToday = todayOrders.reduce((sum, o) => {
-    // total includes deliveryFee, so calculate items subtotal
-    const subtotal = o.items.reduce((s, it) => s + it.unitPrice * it.qty, 0);
-    const orderTime = new Date(o.createdAt).getTime();
-    const storeTime = new Date(store.createdAt).getTime();
-    const isTrialOrder = (orderTime - storeTime) < 30 * 24 * 60 * 60 * 1000;
-    const rate = isTrialOrder ? 0 : store.commissionRate;
-    return sum + subtotal * rate;
-  }, 0);
-
-  // Profit today = items total sale - items total cost - commission
+  // Profit today = items total sale - items total cost
   const profitToday = todayOrders.reduce((sum, o) => {
     const itemsSale = o.items.reduce((s, it) => s + it.unitPrice * it.qty, 0);
     const itemsCost = o.items.reduce((s, it) => s + (it.product?.costPrice || 0) * it.qty, 0);
-    const orderTime = new Date(o.createdAt).getTime();
-    const storeTime = new Date(store.createdAt).getTime();
-    const isTrialOrder = (orderTime - storeTime) < 30 * 24 * 60 * 60 * 1000;
-    const rate = isTrialOrder ? 0 : store.commissionRate;
-    const commission = itemsSale * rate;
-    return sum + (itemsSale - itemsCost - commission);
+    return sum + (itemsSale - itemsCost);
   }, 0);
 
   // Weekly Sales Chart Data
@@ -148,13 +132,7 @@ export default function MerchantDashboard() {
 
   // Plan Expiry status
   const isTrialExpired = new Date() > new Date(store.planExpiresAt);
-  const isDelinquent = isTrialExpired && store.plan === 'FREE' && store.balance < 5000;
-
-  // Recharge message for WhatsApp
-  const rechargeMsg = encodeURIComponent(
-    `Hola Administrador, deseo solicitar una recarga de saldo para mi tienda "${store.name}".\nID Tienda: ${store.id}`
-  );
-  const adminWhatsAppUrl = `https://wa.me/573001234567?text=${rechargeMsg}`;
+  const isDelinquent = false;
 
   return (
     <div className="space-y-8 font-sans pb-12">
@@ -162,41 +140,14 @@ export default function MerchantDashboard() {
       <div className="bg-gradient-to-r from-orange-500 to-amber-500 text-white rounded-3xl p-6 md:p-8 shadow-md flex flex-col md:flex-row items-center justify-between gap-6">
         <div className="space-y-2 text-center md:text-left">
           <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-black bg-white/20 text-white uppercase tracking-wider">
-            {store.plan === 'PRO' ? '💎 Plan Profesional' : '🌱 Plan Básico (Prueba)'}
+            {store.plan === 'PREMIUM' ? '🤖 Plan PREMIUM (Chatbot IA)' : store.plan === 'PRO' ? '💎 Plan Profesional' : '🌱 Plan Básico (Prueba)'}
           </span>
           <h1 className="text-3xl font-black">{store.name}</h1>
           <p className="text-white/95 text-sm md:text-base max-w-xl">
             {store.description || 'Configura la descripción de tu negocio en la pestaña Configuración.'}
           </p>
         </div>
-        <div className="shrink-0 flex gap-4">
-          <div className="bg-white/10 px-4 py-3 rounded-2xl text-center">
-            <p className="text-xs text-white/80 font-bold uppercase tracking-wider">Mi Saldo</p>
-            <p className="text-xl font-black mt-0.5">{formatCurrency(store.balance)}</p>
-          </div>
-        </div>
       </div>
-
-      {/* Warnings & Alerts */}
-      {isDelinquent && (
-        <div className="bg-red-50 dark:bg-red-950/20 border border-red-200 dark:border-red-900/40 rounded-3xl p-5 flex flex-col sm:flex-row items-start gap-4">
-          <AlertTriangle className="text-red-500 shrink-0 mt-0.5" size={24} />
-          <div className="space-y-1.5">
-            <h4 className="font-extrabold text-red-800 dark:text-red-400">¡Tienda Ocultada por Saldo Insuficiente!</h4>
-            <p className="text-xs text-red-700 dark:text-red-300 leading-relaxed">
-              Tu periodo de prueba ha finalizado y tu saldo es menor a $5.000 COP. Tus productos han sido ocultados automáticamente del marketplace para los clientes. Solicita una recarga inmediatamente para volver a activar tu tienda.
-            </p>
-            <a
-              href={adminWhatsAppUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="inline-flex items-center gap-1.5 px-4 py-2 bg-red-650 hover:bg-red-700 text-white text-xs font-bold rounded-xl shadow-sm transition mt-2"
-            >
-              <Send size={12} /> Solicitar Recarga vía WhatsApp
-            </a>
-          </div>
-        </div>
-      )}
 
       {!store.active && (
         <div className="bg-amber-50 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-900/40 rounded-3xl p-5 flex flex-col sm:flex-row items-start gap-4">
@@ -211,7 +162,7 @@ export default function MerchantDashboard() {
       )}
 
       {/* Overview Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-5">
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
         <div className="bg-white dark:bg-gray-800 p-5 rounded-3xl border border-gray-150/45 dark:border-gray-700/60 shadow-xs flex items-center gap-4">
           <div className="p-3 bg-green-50 dark:bg-green-950/30 text-green-500 rounded-2xl">
             <DollarSign size={24} />
@@ -229,16 +180,6 @@ export default function MerchantDashboard() {
           <div>
             <p className="text-xs text-gray-400 font-bold uppercase tracking-wider">Pedidos Hoy</p>
             <p className="text-xl font-black text-gray-900 dark:text-white mt-0.5">{ordersTodayCount} ord</p>
-          </div>
-        </div>
-
-        <div className="bg-white dark:bg-gray-800 p-5 rounded-3xl border border-gray-150/45 dark:border-gray-700/60 shadow-xs flex items-center gap-4">
-          <div className="p-3 bg-orange-50 dark:bg-orange-950/30 text-orange-500 rounded-2xl">
-            <Percent size={24} />
-          </div>
-          <div>
-            <p className="text-xs text-gray-400 font-bold uppercase tracking-wider">Comisión Aplicada</p>
-            <p className="text-xl font-black text-gray-900 dark:text-white mt-0.5">{isStoreInTrial ? '0% (Mes Gratis)' : `${(store.commissionRate * 100)}%`}</p>
           </div>
         </div>
 
@@ -310,7 +251,9 @@ export default function MerchantDashboard() {
             <div className="flex items-center justify-between">
               <h3 className="font-extrabold text-lg">Mi Suscripción</h3>
               <span className={`px-2.5 py-0.5 rounded-full text-xs font-black uppercase ${
-                store.plan === 'PRO'
+                store.plan === 'PREMIUM'
+                  ? 'bg-blue-100 dark:bg-blue-950/40 text-blue-600 dark:text-blue-400'
+                  : store.plan === 'PRO'
                   ? 'bg-purple-100 dark:bg-purple-950/40 text-purple-600 dark:text-purple-400'
                   : 'bg-orange-100 dark:bg-orange-950/40 text-orange-600 dark:text-orange-400'
               }`}>
@@ -323,39 +266,37 @@ export default function MerchantDashboard() {
                 <span className="text-gray-500 font-semibold flex items-center gap-1.5"><Calendar size={16} /> Renovación</span>
                 <span className="font-bold">{new Date(store.planExpiresAt).toLocaleDateString('es-CO', { day: 'numeric', month: 'short', year: 'numeric' })}</span>
               </div>
-              <div className="flex items-center justify-between text-sm">
-                <span className="text-gray-500 font-semibold flex items-center gap-1.5"><Percent size={16} /> Tasa de Comisión</span>
-                <span className="font-bold">{isStoreInTrial ? '0% (Mes de Prueba Gratis)' : `${(store.commissionRate * 100)}% por compra`}</span>
-              </div>
               {store.plan === 'FREE' && (
                 <div className="bg-orange-50/50 dark:bg-orange-950/10 border border-orange-100/50 dark:border-orange-900/20 rounded-2xl p-3 text-[11px] text-orange-600 dark:text-orange-400 leading-relaxed font-semibold">
-                  💡 En el Plan Básico estás limitado a 10 productos activos y un 8% de comisión. ¡Actualízate a PRO para eliminar los límites y bajar tu comisión al 4%!
+                  💡 En el Plan Básico estás limitado a 10 productos activos. ¡Actualízate a PRO para eliminar los límites!
                 </div>
               )}
             </div>
           </div>
 
-          <div className="space-y-3 pt-4 border-t border-gray-100 dark:border-gray-750">
-            <h4 className="text-xs font-extrabold uppercase text-gray-400 tracking-wider">Recargas & Operación</h4>
-            <a
-              href={adminWhatsAppUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="w-full py-3 bg-green-500 hover:bg-green-600 text-white rounded-xl font-bold text-sm flex items-center justify-center gap-2 shadow-sm transition"
-            >
-              <Send size={15} /> Recargar Saldo vía WhatsApp
-            </a>
-            {store.plan === 'FREE' && (
+          {store.plan !== 'PREMIUM' && (
+            <div className="space-y-3 pt-4 border-t border-gray-100 dark:border-gray-750">
+              <h4 className="text-xs font-extrabold uppercase text-gray-400 tracking-wider">Mejorar Cuenta</h4>
+              {store.plan === 'FREE' && (
+                <a
+                  href={`https://wa.me/573001234567?text=${encodeURIComponent(`Hola, deseo solicitar el ascenso a Plan PRO para mi tienda "${store.name}".`)}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="w-full py-3 bg-gradient-to-r from-purple-500 to-indigo-600 hover:from-purple-600 hover:to-indigo-700 text-white rounded-xl font-bold text-sm flex items-center justify-center gap-2 shadow-md transition"
+                >
+                  <Sparkles size={15} /> Subir a Plan PRO ($49,900)
+                </a>
+              )}
               <a
-                href={`https://wa.me/573001234567?text=${encodeURIComponent(`Hola, deseo solicitar el ascenso a Plan PRO para mi tienda "${store.name}".`)}`}
+                href={`https://wa.me/573001234567?text=${encodeURIComponent(`Hola, deseo solicitar el ascenso a Plan PREMIUM para mi tienda "${store.name}".`)}`}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="w-full py-3 bg-gradient-to-r from-purple-500 to-indigo-600 hover:from-purple-600 hover:to-indigo-700 text-white rounded-xl font-bold text-sm flex items-center justify-center gap-2 shadow-md transition"
+                className="w-full py-3 bg-gradient-to-r from-blue-500 to-indigo-600 hover:from-blue-600 hover:to-indigo-700 text-white rounded-xl font-bold text-sm flex items-center justify-center gap-2 shadow-md transition"
               >
-                <Sparkles size={15} /> Subir a Plan PRO ($49,900)
+                <Sparkles size={15} /> Subir a Plan PREMIUM ($149,900)
               </a>
-            )}
-          </div>
+            </div>
+          )}
         </div>
 
       </div>

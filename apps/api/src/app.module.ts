@@ -22,6 +22,7 @@ import { HealthModule } from './health/health.module';
 import { ProductionOrdersModule } from './production-orders/production-orders.module';
 import { PreparedAuthorizationsModule } from './prepared-authorizations/prepared-authorizations.module';
 import { StoresModule } from './stores/stores.module';
+import { ChatbotModule } from './chatbot/chatbot.module';
 
 @Module({
   imports: [
@@ -47,6 +48,7 @@ import { StoresModule } from './stores/stores.module';
     HealthModule,
     ProductionOrdersModule,
     StoresModule,
+    ChatbotModule,
   ],
 })
 export class AppModule {}

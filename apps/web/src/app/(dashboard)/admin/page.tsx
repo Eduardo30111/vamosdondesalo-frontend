@@ -31,7 +31,7 @@ interface DashboardStats {
   activeOrders: number;
   profitToday: number;
   deliveryActive: number;
-  topProducts: Array<{ name: string; count: number }>;
+  topProducts: Array<{ name: string; count: number; totalRevenue: number }>;
   weeklySales: Array<{ date: string; total: number }>;
   hourlyOrders: number[];
 }
@@ -53,6 +53,7 @@ const getDaysAgo = (num: number) => {
 export default function AdminPage() {
   const [stats, setStats] = useState<DashboardStats | null>(null);
   const [vitrina, setVitrina] = useState<VitrinaItem[]>([]);
+  const [selectedProductIndex, setSelectedProductIndex] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
 
   const todayDate = toLocalDateInputValue(new Date());
@@ -91,7 +92,7 @@ export default function AdminPage() {
         api.get<DashboardStats>('/dashboard/stats'),
         api.get<Array<{ date: string; total: number }>>(`/dashboard/weekly-chart?from=${cFrom}&to=${cTo}`),
         api.get<{ hourlyOrders: number[] }>('/dashboard/hourly'),
-        api.get<Array<{ name: string; count: number }>>(`/dashboard/top-products?from=${productsDate}&to=${productsDate}`),
+        api.get<Array<{ name: string; count: number; totalRevenue: number }>>(`/dashboard/top-products?from=${productsDate}&to=${productsDate}`),
         api.get<VitrinaItem[]>('/products'),
       ]);
       setStats({
@@ -119,7 +120,7 @@ export default function AdminPage() {
 
   const loadTopProducts = async (from: string, to: string) => {
     try {
-      const data = await api.get<Array<{ name: string; count: number }>>(`/dashboard/top-products?from=${from}&to=${to}`);
+      const data = await api.get<Array<{ name: string; count: number; totalRevenue: number }>>(`/dashboard/top-products?from=${from}&to=${to}`);
       setStats(prev => prev ? { ...prev, topProducts: data } : null);
     } catch (err: unknown) {
       toast.error('Error cargando productos más vendidos');
@@ -306,18 +307,30 @@ export default function AdminPage() {
         </div>
         <div className="space-y-3">
           {stats.topProducts.map((product, i) => (
-            <div key={i} className="flex items-center gap-3">
-              <span className="w-7 h-7 rounded-full bg-salo-orange text-white flex items-center justify-center text-xs font-bold">
+            <div 
+              key={i} 
+              onClick={() => setSelectedProductIndex(selectedProductIndex === i ? null : i)}
+              className="flex items-center gap-3 cursor-pointer hover:bg-gray-50/40 dark:hover:bg-gray-700/20 p-2 rounded-xl transition relative"
+            >
+              {/* Floating Tooltip */}
+              {selectedProductIndex === i && (
+                <div className="absolute -top-7 right-2 bg-gray-900 text-white dark:bg-white dark:text-gray-900 text-[10px] font-black px-2.5 py-1 rounded-lg shadow-lg z-10 animate-scale-up pointer-events-none border border-gray-100 dark:border-gray-800">
+                  Total vendido: {formatCurrency(product.totalRevenue || 0)}
+                  <div className="absolute bottom-0 right-4 transform translate-y-1 rotate-45 w-1.5 h-1.5 bg-gray-900 dark:bg-white" />
+                </div>
+              )}
+
+              <span className="w-7 h-7 rounded-full bg-salo-orange text-white flex items-center justify-center text-xs font-bold shrink-0">
                 {i + 1}
               </span>
-              <div className="flex-1">
+              <div className="flex-1 min-w-0">
                 <div className="flex items-center justify-between">
-                  <span className="font-medium text-sm">{product.name}</span>
-                  <span className="text-sm text-gray-500">{product.count} unidades</span>
+                  <span className="font-semibold text-sm truncate pr-2 text-gray-800 dark:text-gray-250">{product.name}</span>
+                  <span className="text-xs text-gray-500 font-bold bg-gray-100 dark:bg-gray-700 px-2 py-0.5 rounded-md shrink-0">{product.count} unidades</span>
                 </div>
-                <div className="mt-1 h-2 bg-gray-100 dark:bg-gray-700 rounded-full overflow-hidden">
+                <div className="mt-1 h-2 bg-gray-100 dark:bg-gray-750 rounded-full overflow-hidden">
                   <div
-                    className="h-full bg-salo-orange rounded-full"
+                    className="h-full bg-salo-orange rounded-full transition-all duration-300"
                     style={{ width: `${(product.count / (stats.topProducts[0]?.count || 1)) * 100}%` }}
                   />
                 </div>

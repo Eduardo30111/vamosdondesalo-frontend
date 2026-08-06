@@ -4,8 +4,9 @@ import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { toast } from 'sonner';
+import { formatErrorMessage } from '@/lib/error-handler';
 import { useAuthStore } from '@/store/auth';
-import { ArrowLeft, Store, Shield, Check, DollarSign, Users, Award, Percent } from 'lucide-react';
+import { ArrowLeft, Store, Shield, Check, DollarSign, Users, Award, Percent, Sparkles } from 'lucide-react';
 
 export default function RegisterMerchantPage() {
   const router = useRouter();
@@ -25,7 +26,7 @@ export default function RegisterMerchantPage() {
     description: '',
     category: 'RESTAURANT',
     // Plan
-    plan: 'FREE' as 'FREE' | 'PRO',
+    plan: 'FREE' as 'FREE' | 'PRO' | 'PREMIUM',
   });
 
   const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000';
@@ -37,7 +38,7 @@ export default function RegisterMerchantPage() {
     });
   };
 
-  const handleSelectPlan = (plan: 'FREE' | 'PRO') => {
+  const handleSelectPlan = (plan: 'FREE' | 'PRO' | 'PREMIUM') => {
     setFormData({ ...formData, plan });
   };
 
@@ -116,7 +117,7 @@ export default function RegisterMerchantPage() {
       
       router.push('/merchant');
     } catch (err: any) {
-      toast.error(err.message || 'Hubo un error al registrarse');
+      toast.error(formatErrorMessage(err, 'Hubo un error al registrarse'));
       // Clear half-logged sessions
       localStorage.removeItem('token');
       localStorage.removeItem('user');
@@ -288,7 +289,7 @@ export default function RegisterMerchantPage() {
             <div className="space-y-6">
               <h3 className="text-lg font-bold">Selecciona tu Plan</h3>
               
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                 {/* Free plan card */}
                 <div
                   onClick={() => handleSelectPlan('FREE')}
@@ -304,7 +305,6 @@ export default function RegisterMerchantPage() {
                     <p className="text-xs text-gray-500 leading-relaxed">Prueba la plataforma sin costo fijo mensual.</p>
                   </div>
                   <ul className="space-y-2 mt-4 text-xs font-semibold text-gray-600 dark:text-gray-400">
-                    <li className="flex items-center gap-1.5"><Percent size={14} className="text-orange-500" /> Comisión: 8% por venta</li>
                     <li className="flex items-center gap-1.5"><Shield size={14} className="text-orange-500" /> Límite: 10 productos activos</li>
                     <li className="flex items-center gap-1.5"><Check size={14} className="text-orange-500" /> 1 Mes de Prueba Gratis</li>
                   </ul>
@@ -326,11 +326,34 @@ export default function RegisterMerchantPage() {
                     <p className="text-xs text-gray-500 leading-relaxed">Para negocios que buscan automatización y control total.</p>
                   </div>
                   <ul className="space-y-2 mt-4 text-xs font-semibold text-gray-600 dark:text-gray-400">
-                    <li className="flex items-center gap-1.5"><Percent size={14} className="text-orange-500" /> Comisión: 4% por venta</li>
                     <li className="flex items-center gap-1.5"><Shield size={14} className="text-orange-500" /> Sin límite de productos</li>
                     <li className="flex items-center gap-1.5"><DollarSign size={14} className="text-orange-500" /> Control de Vitrina vs Preparados</li>
                     <li className="flex items-center gap-1.5"><Users size={14} className="text-orange-500" /> Gestión de empleados</li>
                     <li className="flex items-center gap-1.5"><Award size={14} className="text-orange-500" /> Estadísticas y analíticas diarias</li>
+                  </ul>
+                </div>
+
+                {/* Premium plan card */}
+                <div
+                  onClick={() => handleSelectPlan('PREMIUM')}
+                  className={`p-5 rounded-3xl border-2 transition cursor-pointer flex flex-col justify-between relative ${
+                    formData.plan === 'PREMIUM'
+                      ? 'border-orange-500 bg-orange-50/10 dark:bg-orange-950/10'
+                      : 'border-gray-200 dark:border-gray-750 bg-white dark:bg-gray-800 hover:border-gray-300 dark:hover:border-gray-650'
+                  }`}
+                >
+                  <div className="absolute -top-2.5 right-4 bg-blue-600 text-white text-[9px] font-black tracking-widest px-2.5 py-0.5 rounded-full uppercase shadow-sm">Completo</div>
+                  <div className="space-y-2">
+                    <span className="inline-flex px-2 py-0.5 rounded-md text-[10px] font-extrabold uppercase bg-blue-100 dark:bg-blue-950/40 text-blue-600 dark:text-blue-400">Plan Chatbot IA</span>
+                    <h4 className="font-extrabold text-lg text-gray-900 dark:text-white">$149,900 <span className="text-[10px] text-gray-400 font-bold">/ mes</span></h4>
+                    <p className="text-xs text-gray-500 leading-relaxed">Automatización de WhatsApp con IA y contexto de tu catálogo.</p>
+                  </div>
+                  <ul className="space-y-2 mt-4 text-xs font-semibold text-gray-600 dark:text-gray-400">
+                    <li className="flex items-center gap-1.5 text-blue-600 dark:text-blue-400"><Sparkles size={14} /> Chatbot IA en WhatsApp</li>
+                    <li className="flex items-center gap-1.5"><Shield size={14} className="text-orange-500" /> Sin límite de productos</li>
+                    <li className="flex items-center gap-1.5"><DollarSign size={14} className="text-orange-500" /> Control de Vitrina vs Preparados</li>
+                    <li className="flex items-center gap-1.5"><Users size={14} className="text-orange-500" /> Gestión de empleados y reportes</li>
+                    <li className="flex items-center gap-1.5"><Award size={14} className="text-orange-500" /> Métricas y tasa de conversión de IA</li>
                   </ul>
                 </div>
               </div>

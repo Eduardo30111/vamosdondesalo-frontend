@@ -101,15 +101,14 @@ export class StoresService implements OnModuleInit {
     return store;
   }
 
-  async create(ownerId: string, data: { name: string; description?: string; logoUrl?: string; bannerUrl?: string; whatsappNumber: string; category: string; plan?: 'FREE' | 'PRO' }) {
+  async create(ownerId: string, data: { name: string; description?: string; logoUrl?: string; bannerUrl?: string; whatsappNumber: string; category: string; plan?: 'FREE' | 'PRO' | 'PREMIUM' }) {
     const existing = await this.prisma.store.findUnique({ where: { ownerId } });
     if (existing) throw new BadRequestException('El usuario ya tiene una tienda registrada');
 
     const planExpiresAt = new Date();
     planExpiresAt.setMonth(planExpiresAt.getMonth() + 1);
 
-    const planSelected = data.plan || 'FREE';
-    const commissionRate = planSelected === 'PRO' ? 0.04 : 0.08;
+    const commissionRate = 0.0;
 
     const store = await this.prisma.store.create({
       data: {
@@ -119,7 +118,7 @@ export class StoresService implements OnModuleInit {
         bannerUrl: data.bannerUrl,
         whatsappNumber: data.whatsappNumber,
         category: data.category,
-        plan: planSelected as any,
+        plan: (data.plan || 'FREE') as any,
         planExpiresAt,
         commissionRate,
         ownerId,
@@ -161,5 +160,30 @@ export class StoresService implements OnModuleInit {
       where: { id },
       data: { active }
     });
+  }
+
+  async remove(id: string) {
+    const store = await this.prisma.store.findUnique({ where: { id } });
+    if (!store) throw new NotFoundException('Tienda no encontrada');
+
+    await this.prisma.$transaction(async (tx) => {
+      // 1. Clear storeId from users
+      await tx.user.updateMany({
+        where: { storeId: id },
+        data: { storeId: null }
+      });
+
+      // 2. Delete all orders related to this store (this will cascade delete orderItems and payments)
+      await tx.order.deleteMany({
+        where: { storeId: id }
+      });
+
+      // 3. Delete the store (which cascades products due to onDelete: Cascade on Product.storeId)
+      await tx.store.delete({
+        where: { id }
+      });
+    });
+
+    return { success: true };
   }
 }

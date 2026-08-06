@@ -40,6 +40,7 @@ export class DashboardService {
   }
 
   async getStats() {
+    await this.prisma.checkAndResetDailyStock();
     const { start, end } = this.getTodayRange();
 
     const [
@@ -48,7 +49,6 @@ export class DashboardService {
       activeOrders,
       activeDeliveries,
       kitchenPending,
-      topProducts,
       expensesToday,
       wastesToday,
     ] = await Promise.all([
@@ -60,14 +60,7 @@ export class DashboardService {
       this.prisma.order.count({ where: { fulfillmentStatus: { in: ['PENDING', 'PREPARING', 'READY', 'DELIVERED'] } } }),
       this.prisma.order.count({ where: { type: 'DELIVERY', fulfillmentStatus: { not: 'DELIVERED' } } }),
       this.prisma.order.count({ where: { fulfillmentStatus: 'PENDING' } }),
-      this.prisma.orderItem.groupBy({
-        by: ['productId'],
-        _sum: { qty: true },
-        where: { order: { createdAt: { gte: start, lte: end }, fulfillmentStatus: { not: 'CANCELLED' } } },
-        orderBy: { _sum: { qty: 'desc' } },
-        take: 5,
-      }),
-      this.prisma.expense.aggregate({ where: { date: { gte: start, lte: end } }, _sum: { amount: true } }),
+      this.prisma.expense.aggregate({ where: { date: { gte: start, lte: end }, type: 'DAILY' }, _sum: { amount: true } }),
       this.prisma.waste.findMany({ where: { createdAt: { gte: start, lte: end } }, include: { product: { select: { costPrice: true } } } }),
     ]);
 
@@ -75,7 +68,7 @@ export class DashboardService {
 
     const orderItemsToday = await this.prisma.orderItem.findMany({
       where: { order: { createdAt: { gte: start, lte: end }, paymentStatus: { in: ['PAID', 'FIADO'] }, fulfillmentStatus: { not: 'CANCELLED' } } },
-      include: { product: { select: { costPrice: true, type: true } } },
+      include: { product: { select: { costPrice: true, type: true, name: true } } },
     });
 
     const costProducts = orderItemsToday.reduce((sum, item) => sum + item.qty * item.product.costPrice, 0);
@@ -83,12 +76,22 @@ export class DashboardService {
     const expensesTodayTotal = expensesToday._sum.amount || 0;
     const profitToday = totalSales - costProducts - expensesTodayTotal - wasteCost;
 
-    const productIds = topProducts.map((p) => p.productId);
-    const products = await this.prisma.product.findMany({ where: { id: { in: productIds } } });
-    const productMap = new Map(products.map((p) => [p.id, p.name]));
+    // Compute top products from order items sold today
+    const productStatsTodayMap = new Map<string, { name: string; count: number; totalRevenue: number }>();
+    orderItemsToday.forEach(item => {
+      const pId = item.productId;
+      const stats = productStatsTodayMap.get(pId) || { name: item.product.name, count: 0, totalRevenue: 0 };
+      stats.count += item.qty;
+      stats.totalRevenue += item.qty * item.unitPrice;
+      productStatsTodayMap.set(pId, stats);
+    });
 
-    const topProduct = topProducts.length > 0
-      ? { name: productMap.get(topProducts[0].productId) || 'N/A', count: topProducts[0]._sum.qty || 0 }
+    const sortedTopProductsToday = Array.from(productStatsTodayMap.values())
+      .sort((a, b) => b.count - a.count)
+      .slice(0, 5);
+
+    const topProduct = sortedTopProductsToday.length > 0
+      ? { name: sortedTopProductsToday[0].name, count: sortedTopProductsToday[0].count }
       : { name: 'N/A', count: 0 };
 
     return {
@@ -102,7 +105,7 @@ export class DashboardService {
       costProducts,
       wasteCost,
       expensesToday: expensesTodayTotal,
-      topProducts: topProducts.map((p) => ({ name: productMap.get(p.productId) || 'Desconocido', count: p._sum.qty || 0 })),
+      topProducts: sortedTopProductsToday,
     };
   }
 
@@ -161,22 +164,32 @@ export class DashboardService {
 
   async getTopProducts(from?: string, to?: string) {
     const { start, end } = this.getRange(from, to);
-    const topProducts = await this.prisma.orderItem.groupBy({
-      by: ['productId'],
-      _sum: { qty: true },
-      where: { order: { createdAt: { gte: start, lte: end }, fulfillmentStatus: { not: 'CANCELLED' } } },
-      orderBy: { _sum: { qty: 'desc' } },
-      take: 10,
+    const orderItems = await this.prisma.orderItem.findMany({
+      where: {
+        order: {
+          createdAt: { gte: start, lte: end },
+          fulfillmentStatus: { not: 'CANCELLED' },
+        },
+      },
+      include: {
+        product: {
+          select: { name: true },
+        },
+      },
     });
 
-    const productIds = topProducts.map((p) => p.productId);
-    const products = await this.prisma.product.findMany({ where: { id: { in: productIds } } });
-    const productMap = new Map(products.map((p) => [p.id, p.name]));
+    const productStatsMap = new Map<string, { name: string; count: number; totalRevenue: number }>();
+    orderItems.forEach(item => {
+      const pId = item.productId;
+      const stats = productStatsMap.get(pId) || { name: item.product?.name || 'Desconocido', count: 0, totalRevenue: 0 };
+      stats.count += item.qty;
+      stats.totalRevenue += item.qty * item.unitPrice;
+      productStatsMap.set(pId, stats);
+    });
 
-    return topProducts.map((p) => ({
-      name: productMap.get(p.productId) || 'Desconocido',
-      count: p._sum.qty || 0,
-    }));
+    return Array.from(productStatsMap.values())
+      .sort((a, b) => b.count - a.count)
+      .slice(0, 10);
   }
 
   async getHourly() {

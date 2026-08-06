@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react';
 import { toast } from 'sonner';
 import { api } from '@/lib/api';
 import { formatCurrency } from '@/lib/utils';
-import { Bike, Phone, MapPin, Clock, ChevronRight } from 'lucide-react';
+import { Bike, Phone, MapPin, Clock, ChevronRight, ChevronDown, Calendar, History } from 'lucide-react';
 
 interface DeliveryOrder {
   id: string;
@@ -16,7 +16,7 @@ interface DeliveryOrder {
   deliveryFee: number;
   createdAt: string;
   deliveryZone: { id: string; name: string; fee: number } | null;
-  items: Array<{ id: string; qty: number; product: { name: string } }>;
+  items: Array<{ id: string; qty: number; isPrep?: boolean; product: { name: string } }>;
 }
 
 const statusLabels: Record<string, string> = {
@@ -42,9 +42,31 @@ const nextStatus: Record<string, string> = {
   IN_TRANSIT: 'DELIVERED',
 };
 
+interface DailySummary {
+  date: string;
+  totalOrders: number;
+  totalSales: number;
+  totalDeliveryFees: number;
+  orders: Array<{
+    id: string;
+    customerName: string;
+    customerAddress: string | null;
+    total: number;
+    deliveryZone: { name: string } | null;
+  }>;
+}
+
 export default function DomiciliosPage() {
   const [orders, setOrders] = useState<DeliveryOrder[]>([]);
   const [loading, setLoading] = useState(true);
+  const [showHistory, setShowHistory] = useState(false);
+  const [selectedMonth, setSelectedMonth] = useState(() => {
+    const now = new Date();
+    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+  });
+  const [dailySummaries, setDailySummaries] = useState<DailySummary[]>([]);
+  const [loadingHistory, setLoadingHistory] = useState(false);
+  const [expandedDays, setExpandedDays] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     loadOrders();
@@ -79,6 +101,38 @@ export default function DomiciliosPage() {
     const mins = Math.floor((Date.now() - new Date(date).getTime()) / 60000);
     if (mins < 60) return `${mins} min`;
     return `${Math.floor(mins / 60)}h ${mins % 60}m`;
+  };
+
+  const isKitchenPending = (order: DeliveryOrder) => {
+    const hasPrep = order.items.some((i) => i.isPrep);
+    return hasPrep && order.status !== 'READY' && order.status !== 'IN_TRANSIT' && order.status !== 'DELIVERED';
+  };
+
+  const loadHistory = async (month: string) => {
+    setLoadingHistory(true);
+    try {
+      const data = await api.get<DailySummary[]>('/orders/deliveries/daily-summary?month=' + month);
+      setDailySummaries(data);
+    } catch (err: unknown) {
+      toast.error(err instanceof Error ? err.message : 'Error cargando historial');
+    } finally {
+      setLoadingHistory(false);
+    }
+  };
+
+  useEffect(() => {
+    if (showHistory) {
+      loadHistory(selectedMonth);
+    }
+  }, [showHistory, selectedMonth]);
+
+  const toggleDay = (date: string) => {
+    setExpandedDays((prev) => {
+      const next = new Set(prev);
+      if (next.has(date)) next.delete(date);
+      else next.add(date);
+      return next;
+    });
   };
 
   if (loading) {
@@ -150,20 +204,144 @@ export default function DomiciliosPage() {
 
               <div className="flex items-center justify-between">
                 <span className="font-bold text-salo-orange">{formatCurrency(order.total)}</span>
-                {nextStatus[order.status] && (
-                  <button
-                    onClick={() => advanceStatus(order.id, order.status)}
-                    className="px-4 py-2 bg-salo-orange text-white rounded-xl text-sm font-medium hover:bg-primary-700 transition flex items-center gap-1"
-                  >
-                    {statusLabels[nextStatus[order.status]]}
-                    <ChevronRight size={16} />
-                  </button>
-                )}
+                <div className="flex items-center gap-2">
+                  {isKitchenPending(order) && (
+                    <span className="px-2 py-1 rounded-full text-xs font-medium bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300">
+                      ⏳ Esperando Cocina
+                    </span>
+                  )}
+                  {nextStatus[order.status] && (
+                    <button
+                      onClick={() => advanceStatus(order.id, order.status)}
+                      disabled={isKitchenPending(order)}
+                      className={`px-4 py-2 rounded-xl text-sm font-medium transition flex items-center gap-1 ${
+                        isKitchenPending(order)
+                          ? 'bg-gray-200 text-gray-400 cursor-not-allowed dark:bg-gray-700 dark:text-gray-500'
+                          : 'bg-salo-orange text-white hover:bg-primary-700'
+                      }`}
+                    >
+                      {statusLabels[nextStatus[order.status]]}
+                      <ChevronRight size={16} />
+                    </button>
+                  )}
+                </div>
               </div>
             </div>
           ))}
         </div>
       )}
+
+      {/* Daily Delivery History */}
+      <div className="mt-10">
+        <button
+          onClick={() => setShowHistory(!showHistory)}
+          className="flex items-center gap-2 text-lg font-bold mb-4 hover:text-salo-orange transition"
+        >
+          <History size={20} className="text-salo-orange" />
+          📋 Historial de Domicilios
+          <ChevronDown
+            size={18}
+            className={`transition-transform ${showHistory ? 'rotate-180' : ''}`}
+          />
+        </button>
+
+        {showHistory && (
+          <div className="space-y-4">
+            <div className="flex items-center gap-3">
+              <Calendar size={18} className="text-gray-400" />
+              <input
+                type="month"
+                value={selectedMonth}
+                onChange={(e) => setSelectedMonth(e.target.value)}
+                className="border border-gray-200 dark:border-gray-700 rounded-xl px-3 py-2 text-sm bg-white dark:bg-gray-800"
+              />
+            </div>
+
+            {loadingHistory ? (
+              <div className="flex items-center justify-center h-32">
+                <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-salo-orange" />
+              </div>
+            ) : dailySummaries.length === 0 ? (
+              <div className="text-center py-8 text-gray-400">
+                <History size={36} className="mx-auto mb-2 opacity-50" />
+                <p>No hay registros para este mes</p>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {dailySummaries
+                  .sort((a, b) => b.date.localeCompare(a.date))
+                  .map((day) => (
+                    <div
+                      key={day.date}
+                      className="bg-white dark:bg-gray-800 rounded-2xl shadow-sm border border-gray-100 dark:border-gray-700 overflow-hidden"
+                    >
+                      <button
+                        onClick={() => toggleDay(day.date)}
+                        className="w-full px-5 py-4 flex items-center justify-between hover:bg-gray-50 dark:hover:bg-gray-750 transition"
+                      >
+                        <div className="flex items-center gap-4">
+                          <span className="font-bold text-sm">
+                            {new Date(day.date + 'T12:00:00').toLocaleDateString('es-CO', {
+                              weekday: 'short',
+                              day: 'numeric',
+                              month: 'short',
+                            })}
+                          </span>
+                          <span className="text-xs px-2 py-1 rounded-full bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300">
+                            {day.totalOrders} pedidos
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-4">
+                          <div className="text-right">
+                            <p className="text-sm font-bold text-salo-orange">
+                              {formatCurrency(day.totalSales)}
+                            </p>
+                            <p className="text-xs text-gray-400">
+                              Envío: {formatCurrency(day.totalDeliveryFees)}
+                            </p>
+                          </div>
+                          <ChevronDown
+                            size={16}
+                            className={`text-gray-400 transition-transform ${
+                              expandedDays.has(day.date) ? 'rotate-180' : ''
+                            }`}
+                          />
+                        </div>
+                      </button>
+
+                      {expandedDays.has(day.date) && (
+                        <div className="border-t border-gray-100 dark:border-gray-700 px-5 py-3 space-y-2">
+                          {day.orders.map((o) => (
+                            <div
+                              key={o.id}
+                              className="flex items-center justify-between py-2 border-b border-gray-50 dark:border-gray-700 last:border-0"
+                            >
+                              <div>
+                                <p className="text-sm font-medium">{o.customerName}</p>
+                                {o.customerAddress && (
+                                  <p className="text-xs text-gray-400 flex items-center gap-1">
+                                    <MapPin size={10} />
+                                    {o.customerAddress}
+                                  </p>
+                                )}
+                              </div>
+                              <div className="text-right">
+                                <p className="text-sm font-bold">{formatCurrency(o.total)}</p>
+                                {o.deliveryZone && (
+                                  <p className="text-xs text-salo-orange">{o.deliveryZone.name}</p>
+                                )}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  ))}
+              </div>
+            )}
+          </div>
+        )}
+      </div>
     </div>
   );
 }

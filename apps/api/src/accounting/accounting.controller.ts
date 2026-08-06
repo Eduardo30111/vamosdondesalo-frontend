@@ -11,17 +11,46 @@ export class AccountingController {
   constructor(private service: AccountingService) {}
 
   @Get('daily')
-  getDailyReport(@Query('date') date: string) {
-    return this.service.getDailyReport(date ? new Date(date) : new Date());
+  getDailyReport(@Query('date') date?: string) {
+    let targetDate: Date;
+    if (date) {
+      const parts = date.split('-');
+      targetDate = new Date(Date.UTC(parseInt(parts[0]), parseInt(parts[1]) - 1, parseInt(parts[2])));
+    } else {
+      const now = new Date();
+      const colombiaNow = new Date(now.getTime() - 5 * 60 * 60 * 1000);
+      targetDate = new Date(Date.UTC(colombiaNow.getUTCFullYear(), colombiaNow.getUTCMonth(), colombiaNow.getUTCDate()));
+    }
+    return this.service.getDailyReport(targetDate);
   }
 
   @Get('monthly')
-  getMonthlyReport(@Query('year') year: string, @Query('month') month: string) {
-    const now = new Date();
-    return this.service.getMonthlyReport(
-      year ? parseInt(year) : now.getFullYear(),
-      month ? parseInt(month) : now.getMonth() + 1,
-    );
+  getMonthlyReport(@Query('year') year?: string, @Query('month') month?: string) {
+    let targetYear = year ? parseInt(year) : null;
+    let targetMonth = month ? parseInt(month) : null;
+
+    if (!targetYear || !targetMonth) {
+      const now = new Date();
+      const colombiaNow = new Date(now.getTime() - 5 * 60 * 60 * 1000);
+      targetYear = targetYear || colombiaNow.getUTCFullYear();
+      targetMonth = targetMonth || (colombiaNow.getUTCMonth() + 1);
+    }
+
+    return this.service.getMonthlyReport(targetYear, targetMonth);
+  }
+
+  @Get('weekly')
+  getWeeklyReport(@Query('date') dateStr?: string) {
+    let targetDate: Date;
+    if (dateStr) {
+      const parts = dateStr.split('-');
+      targetDate = new Date(Date.UTC(parseInt(parts[0]), parseInt(parts[1]) - 1, parseInt(parts[2])));
+    } else {
+      const now = new Date();
+      const colombiaNow = new Date(now.getTime() - 5 * 60 * 60 * 1000);
+      targetDate = new Date(Date.UTC(colombiaNow.getUTCFullYear(), colombiaNow.getUTCMonth(), colombiaNow.getUTCDate()));
+    }
+    return this.service.getWeeklyReport(targetDate);
   }
 
   @Post('cash-close')

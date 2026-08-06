@@ -12,8 +12,61 @@ export class ExpensesController {
   constructor(private service: ExpensesService) {}
 
   @Get()
-  findAll(@Request() req: any, @Query('type') type?: string) {
-    return this.service.findAll(type, req.storeId);
+  findAll(
+    @Request() req: any,
+    @Query('type') type?: string,
+    @Query('year') year?: string,
+    @Query('month') month?: string,
+  ) {
+    return this.service.findAll(
+      type,
+      req.storeId,
+      year ? parseInt(year) : undefined,
+      month ? parseInt(month) : undefined,
+    );
+  }
+
+  @Get('scheduled')
+  findScheduled(
+    @Request() req: any,
+    @Query('year') year?: string,
+    @Query('month') month?: string,
+  ) {
+    return this.service.findScheduled(
+      req.storeId,
+      year ? parseInt(year) : undefined,
+      month ? parseInt(month) : undefined,
+    );
+  }
+
+  @Post('scheduled')
+  createScheduled(
+    @Body() body: { name: string; description?: string; amount: number; date?: string },
+    @Request() req: any,
+  ) {
+    return this.service.createScheduled({ ...body, userId: req.user.id });
+  }
+
+  @Put('scheduled/:id')
+  updateScheduled(
+    @Param('id') id: string,
+    @Body() body: { name?: string; description?: string; amount?: number; date?: string },
+  ) {
+    return this.service.updateScheduled(id, body);
+  }
+
+  @Delete('scheduled/:id')
+  deleteScheduled(@Param('id') id: string) {
+    return this.service.deleteScheduled(id);
+  }
+
+  @Post('scheduled/:id/pay')
+  payScheduled(
+    @Param('id') id: string,
+    @Body() body: { amount: number },
+    @Request() req: any,
+  ) {
+    return this.service.payScheduled(id, body.amount, req.user.id);
   }
 
   @Get('range')

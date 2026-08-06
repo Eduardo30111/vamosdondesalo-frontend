@@ -82,7 +82,7 @@ export function Sidebar() {
   const [isDark, setIsDark] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
   const [showDownloadModal, setShowDownloadModal] = useState(false);
-  const [storePlan, setStorePlan] = useState<'FREE' | 'PRO'>('FREE');
+  const [storePlan, setStorePlan] = useState<'FREE' | 'PRO' | 'PREMIUM'>('FREE');
 
   useEffect(() => {
     setIsDark(document.documentElement.classList.contains('dark'));
@@ -90,7 +90,7 @@ export function Sidebar() {
 
   useEffect(() => {
     if (user?.role === 'MERCHANT' || user?.role === 'MERCHANT_STAFF') {
-      api.get<{ plan: 'FREE' | 'PRO' }>('/stores/my-store')
+      api.get<{ plan: 'FREE' | 'PRO' | 'PREMIUM' }>('/stores/my-store')
         .then((res) => {
           setStorePlan(res.plan);
         })
