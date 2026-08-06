@@ -7,8 +7,8 @@ import { Providers } from './providers';
 const inter = Inter({ subsets: ['latin'] });
 
 export const metadata: Metadata = {
-  title: 'Vamos Donde Salo!',
-  description: 'Sistema POS - El mejor restaurante de fritos',
+  title: 'Salo Store | Marketplace Local de Puerto Colombia',
+  description: 'Catálogo digital y marketplace de comercios locales en Puerto Colombia: Comida, Artesanías, Productos, Servicios y Salud.',
   manifest: '/manifest.json',
   icons: { apple: '/icons/icon-192.png' },
 };

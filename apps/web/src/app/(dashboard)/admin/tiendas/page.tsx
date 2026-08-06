@@ -133,10 +133,14 @@ export default function AdminStoresPage() {
 
   const getCategoryLabel = (category: string) => {
     switch (category) {
-      case 'RESTAURANT': return 'Comida';
-      case 'SALUD': return 'Salud';
-      case 'TIENDA': return 'Tienda';
-      case 'COMPRA_VENTA': return 'Compra/Venta';
+      case 'COMIDA':
+      case 'RESTAURANT': return '🍔 Comida';
+      case 'ARTESANIAS': return '🎨 Artesanías';
+      case 'PRODUCTOS':
+      case 'TIENDA': return '🛍️ Productos';
+      case 'SERVICIOS': return '🛠️ Servicios';
+      case 'SALUD': return '💊 Salud';
+      case 'COMPRA_VENTA': return '🛍️ Compra/Venta';
       default: return category;
     }
   };

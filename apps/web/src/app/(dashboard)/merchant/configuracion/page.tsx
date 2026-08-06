@@ -228,10 +228,11 @@ export default function MerchantConfigurationPage() {
               onChange={handleChange}
               className="w-full pl-11 pr-4 py-3 rounded-xl border border-gray-200 dark:border-gray-750 bg-gray-50 dark:bg-gray-750 text-sm outline-none focus:ring-2 focus:ring-orange-400 transition"
             >
-              <option value="RESTAURANT">Comida / Restaurantes</option>
-              <option value="SALUD">Salud y Cuidado</option>
-              <option value="TIENDA">Tienda de Productos</option>
-              <option value="COMPRA_VENTA">Compra y Venta</option>
+              <option value="COMIDA">🍔 Comida / Restaurantes</option>
+              <option value="ARTESANIAS">🎨 Artesanías / Souvenirs</option>
+              <option value="PRODUCTOS">🛍️ Productos / Tienda</option>
+              <option value="SERVICIOS">🛠️ Servicios / Turismo</option>
+              <option value="SALUD">💊 Salud / Droguerías</option>
             </select>
           </div>
         </div>

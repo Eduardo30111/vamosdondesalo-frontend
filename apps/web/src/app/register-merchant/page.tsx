@@ -139,7 +139,7 @@ export default function RegisterMerchantPage() {
           Registra tu Negocio
         </h2>
         <p className="mt-2 text-sm text-gray-600 dark:text-gray-400">
-          Únete a Vamos Donde Salo y empieza a vender hoy mismo
+          Únete a Salo Store en Puerto Colombia y digitaliza tu catálogo hoy mismo
         </p>
       </div>
 
@@ -179,7 +179,7 @@ export default function RegisterMerchantPage() {
                   name="name"
                   value={formData.name}
                   onChange={handleChange}
-                  placeholder="Ej: Salo Donado"
+                  placeholder="Tu nombre y apellido"
                   className="w-full px-4 py-3 rounded-xl border border-gray-250 dark:border-gray-700 bg-gray-50 dark:bg-gray-750 outline-none focus:ring-2 focus:ring-orange-400 text-sm transition"
                 />
               </div>
@@ -190,7 +190,7 @@ export default function RegisterMerchantPage() {
                   name="email"
                   value={formData.email}
                   onChange={handleChange}
-                  placeholder="Ej: comerciante@negocio.com"
+                  placeholder="ejemplo@negocio.com"
                   className="w-full px-4 py-3 rounded-xl border border-gray-250 dark:border-gray-700 bg-gray-50 dark:bg-gray-750 outline-none focus:ring-2 focus:ring-orange-400 text-sm transition"
                 />
               </div>
@@ -217,15 +217,15 @@ export default function RegisterMerchantPage() {
 
           {step === 2 && (
             <div className="space-y-4">
-              <h3 className="text-lg font-bold">Detalles de tu Tienda</h3>
+              <h3 className="text-lg font-bold">Detalles de tu Tienda en Puerto Colombia</h3>
               <div>
-                <label className="block text-xs font-extrabold uppercase text-gray-500 dark:text-gray-400 tracking-wider mb-1">Nombre Comercial de la Tienda</label>
+                <label className="block text-xs font-extrabold uppercase text-gray-500 dark:text-gray-400 tracking-wider mb-1">Nombre Comercial del Negocio</label>
                 <input
                   type="text"
                   name="storeName"
                   value={formData.storeName}
                   onChange={handleChange}
-                  placeholder="Ej: Fritos Donde Salo!"
+                  placeholder="Ej: Fritos Donde Salo, Artesanías del Muelle..."
                   className="w-full px-4 py-3 rounded-xl border border-gray-250 dark:border-gray-700 bg-gray-50 dark:bg-gray-750 outline-none focus:ring-2 focus:ring-orange-400 text-sm transition"
                 />
               </div>
@@ -241,17 +241,18 @@ export default function RegisterMerchantPage() {
                 />
               </div>
               <div>
-                <label className="block text-xs font-extrabold uppercase text-gray-500 dark:text-gray-400 tracking-wider mb-1">Categoría</label>
+                <label className="block text-xs font-extrabold uppercase text-gray-500 dark:text-gray-400 tracking-wider mb-1">Categoría del Negocio</label>
                 <select
                   name="category"
                   value={formData.category}
                   onChange={handleChange}
                   className="w-full px-4 py-3 rounded-xl border border-gray-250 dark:border-gray-700 bg-gray-50 dark:bg-gray-750 outline-none focus:ring-2 focus:ring-orange-400 text-sm transition"
                 >
-                  <option value="RESTAURANT">Comida / Restaurante</option>
-                  <option value="SALUD">Salud / Farmacia</option>
-                  <option value="TIENDA">Tienda de Productos / Regalos</option>
-                  <option value="COMPRA_VENTA">Compra y Venta</option>
+                  <option value="COMIDA">🍔 Comida / Restaurantes</option>
+                  <option value="ARTESANIAS">🎨 Artesanías / Souvenirs</option>
+                  <option value="PRODUCTOS">🛍️ Productos / Tienda</option>
+                  <option value="SERVICIOS">🛠️ Servicios / Turismo</option>
+                  <option value="SALUD">💊 Salud / Droguerías</option>
                 </select>
               </div>
               <div>
