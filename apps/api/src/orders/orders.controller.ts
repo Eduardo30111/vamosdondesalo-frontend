@@ -101,6 +101,15 @@ export class OrdersController {
     return this.ordersService.fiar(id, body.customerId);
   }
 
+  @Put(':id/admin-edit-sale')
+  @Roles('ADMIN', 'VENDEDOR')
+  adminEditSale(
+    @Param('id') id: string,
+    @Body() body: { total: number; paymentMethod: 'CASH' | 'NEQUI' | 'FIADO'; customerId?: string; customerName?: string; customerPhone?: string; customerDoc?: string }
+  ) {
+    return this.ordersService.adminEditSale(id, body);
+  }
+
   @Put(':id/add-items')
   @Roles('ADMIN', 'VENDEDOR')
   addItems(@Param('id') id: string, @Body() body: { items: Array<{ productId: string; qty: number; notes?: string }> }) {

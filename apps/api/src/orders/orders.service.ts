@@ -839,4 +839,102 @@ export class OrdersService {
       }))
       .sort((a, b) => b.date.localeCompare(a.date));
   }
+
+  async adminEditSale(id: string, dto: { total: number; paymentMethod: 'CASH' | 'NEQUI' | 'FIADO'; customerId?: string; customerName?: string; customerPhone?: string; customerDoc?: string }) {
+    const order = await this.prisma.order.findUnique({
+      where: { id },
+      include: { payments: true }
+    });
+    if (!order) {
+      throw new BadRequestException('Pedido no encontrado');
+    }
+
+    // Step 1: Revert old FIADO debt if it was fiado
+    if (order.paymentStatus === 'FIADO' && order.isFiated) {
+      // Find the customer who was charged
+      // Since Order doesn't have customerId, we find the customer by customerDoc or name.
+      // Wait, how do we know WHICH customer was charged originally? 
+      // Fiar was called separately from frontend! But the customer name in order might match.
+      // If we don't have customerId on Order, let's look up the customer by name or doc exactly as it is on the order.
+      const oldCustomer = await this.prisma.customer.findFirst({
+        where: {
+          OR: [
+            { cedula: order.customerDoc ?? '___NOT_FOUND___' },
+            { name: order.customerName }
+          ]
+        }
+      });
+      if (oldCustomer) {
+        await this.prisma.customer.update({
+          where: { id: oldCustomer.id },
+          data: { totalDebt: { decrement: order.total } }
+        });
+      }
+    }
+
+    // Step 2: Delete old payments
+    await this.prisma.payment.deleteMany({
+      where: { orderId: id }
+    });
+
+    // Step 3: Apply new payment method & update order total
+    let newPaymentStatus: any = 'UNPAID';
+    let isFiated = false;
+
+    if (dto.paymentMethod === 'FIADO') {
+      newPaymentStatus = 'FIADO';
+      isFiated = true;
+      let customer: any = null;
+
+      if (dto.customerId) {
+        customer = await this.prisma.customer.findUnique({ where: { id: dto.customerId } });
+      } else if (dto.customerDoc && dto.customerName) {
+        customer = await this.prisma.customer.findUnique({ where: { cedula: dto.customerDoc } });
+        if (!customer) {
+          customer = await this.prisma.customer.create({
+            data: {
+              name: dto.customerName,
+              cedula: dto.customerDoc,
+              phone: dto.customerPhone
+            }
+          });
+        }
+      }
+
+      if (!customer) {
+        throw new BadRequestException('Se requiere un cliente para fiar la venta');
+      }
+
+      // Add new debt to customer
+      await this.prisma.customer.update({
+        where: { id: customer.id },
+        data: { totalDebt: { increment: dto.total } }
+      });
+    } else {
+      newPaymentStatus = 'PAID';
+      // Create new payment record
+      await this.prisma.payment.create({
+        data: {
+          orderId: id,
+          method: dto.paymentMethod,
+          amount: dto.total
+        }
+      });
+    }
+
+    const updated = await this.prisma.order.update({
+      where: { id },
+      data: {
+        total: dto.total,
+        paymentStatus: newPaymentStatus,
+        isFiated,
+        updatedAt: new Date()
+      },
+      include: { items: { include: { product: true } }, table: true, deliveryZone: true, payments: true }
+    });
+
+    const legacy = mapOrderLegacyStatus(updated);
+    this.realtime.emitOrderStatusChanged(legacy);
+    return legacy;
+  }
 }

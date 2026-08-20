@@ -38,6 +38,8 @@ interface OrderItem {
 interface Order {
   id: string;
   customerName: string;
+  customerDoc?: string;
+  customerPhone?: string;
   status: string;
   type: string;
   total: number;
@@ -197,6 +199,17 @@ export default function VitrinaPage() {
   const [dailySales, setDailySales] = useState<Order[]>([]);
   const [expandedSales, setExpandedSales] = useState<Record<string, boolean>>({});
   const [salesLoading, setSalesLoading] = useState(false);
+
+  // Corregir Venta (Edit Sale Modal)
+  const [showEditSaleModal, setShowEditSaleModal] = useState(false);
+  const [editSaleOrder, setEditSaleOrder] = useState<Order | null>(null);
+  const [editSaleTotal, setEditSaleTotal] = useState<string>('');
+  const [editSaleMethod, setEditSaleMethod] = useState<'CASH' | 'NEQUI' | 'FIADO'>('CASH');
+  const [editSaleCustomerId, setEditSaleCustomerId] = useState<string | null>(null);
+  const [editSaleCustomerDoc, setEditSaleCustomerDoc] = useState('');
+  const [editSaleCustomerName, setEditSaleCustomerName] = useState('');
+  const [editSaleCustomerPhone, setEditSaleCustomerPhone] = useState('');
+  const [processingEditSale, setProcessingEditSale] = useState(false);
 
   useEffect(() => {
     if (user && user.role !== 'COCINA') {
@@ -556,6 +569,67 @@ export default function VitrinaPage() {
     } catch (e) {
       console.error(e);
       alert('Error al registrar el fiado');
+    }
+  };
+
+  // ─── Corregir Venta Modal (Admin Edit Sale) ──────
+  const abrirCorregirVenta = (sale: Order) => {
+    setEditSaleOrder(sale);
+    setEditSaleTotal(sale.total.toString());
+    
+    let currentMethod: 'CASH' | 'NEQUI' | 'FIADO' = 'CASH';
+    if (sale.paymentStatus === 'FIADO') currentMethod = 'FIADO';
+    else if (sale.payments && sale.payments.some(p => p.method === 'NEQUI')) currentMethod = 'NEQUI';
+    
+    setEditSaleMethod(currentMethod);
+    setEditSaleCustomerId(null);
+    setEditSaleCustomerDoc(sale.customerDoc || '');
+    setEditSaleCustomerName(sale.customerName || '');
+    setEditSaleCustomerPhone(sale.customerPhone || '');
+    setShowEditSaleModal(true);
+  };
+
+  const handleCorregirVenta = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editSaleOrder) return;
+    
+    const numTotal = parseFloat(editSaleTotal);
+    if (isNaN(numTotal) || numTotal < 0) {
+      toast.error('El total ingresado no es válido');
+      return;
+    }
+
+    if (editSaleMethod === 'FIADO') {
+      if (!editSaleCustomerId && (!editSaleCustomerName || !editSaleCustomerDoc)) {
+        toast.error('Debes seleccionar o ingresar un cliente para fiar');
+        return;
+      }
+    }
+
+    try {
+      setProcessingEditSale(true);
+      await api.put(`/orders/${editSaleOrder.id}/admin-edit-sale`, {
+        total: numTotal,
+        paymentMethod: editSaleMethod,
+        customerId: editSaleCustomerId || undefined,
+        customerName: editSaleCustomerName || undefined,
+        customerPhone: editSaleCustomerPhone || undefined,
+        customerDoc: editSaleCustomerDoc || undefined,
+      });
+      
+      toast.success('Venta corregida exitosamente');
+      setShowEditSaleModal(false);
+      fetchOrders();
+      fetchCustomers();
+      if (salesDate) {
+        // Refresh sales for the current date
+        const data = await api.get<Order[]>(`/orders/by-date?date=${salesDate}`);
+        setDailySales(data);
+      }
+    } catch (err: any) {
+      toast.error(err.message || 'Error al corregir venta');
+    } finally {
+      setProcessingEditSale(false);
     }
   };
 
@@ -1743,12 +1817,20 @@ export default function VitrinaPage() {
                       </div>
                       <div className="text-right ml-2 shrink-0">
                         <p className="text-xs font-black text-green-600">{formatCurrency(sale.total)}</p>
-                        <button
-                          onClick={() => setExpandedSales({ ...expandedSales, [sale.id]: !isExpanded })}
-                          className="text-[10px] text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 font-bold flex items-center gap-0.5 ml-auto mt-1"
-                        >
-                          {isExpanded ? 'Ocultar' : 'Detalles'} {isExpanded ? <ChevronUp size={10} /> : <ChevronDown size={10} />}
-                        </button>
+                        <div className="flex items-center gap-2 mt-1 justify-end">
+                          <button
+                            onClick={() => abrirCorregirVenta(sale)}
+                            className="text-[10px] text-blue-500 hover:text-blue-600 font-bold flex items-center gap-0.5"
+                          >
+                            <Edit3 size={10} /> Corregir
+                          </button>
+                          <button
+                            onClick={() => setExpandedSales({ ...expandedSales, [sale.id]: !isExpanded })}
+                            className="text-[10px] text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 font-bold flex items-center gap-0.5"
+                          >
+                            {isExpanded ? 'Ocultar' : 'Detalles'} {isExpanded ? <ChevronUp size={10} /> : <ChevronDown size={10} />}
+                          </button>
+                        </div>
                       </div>
                     </div>
 
@@ -1777,6 +1859,122 @@ export default function VitrinaPage() {
         </div>
       </div>
       </div>
+
+      {/* ═══ Modal Corregir Venta ═══ */}
+      {showEditSaleModal && editSaleOrder && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-white dark:bg-gray-800 rounded-3xl w-full max-w-md p-6 shadow-2xl relative max-h-[90vh] overflow-y-auto">
+            <button onClick={() => setShowEditSaleModal(false)} className="absolute top-4 right-4 p-1">
+              <X size={20} />
+            </button>
+            <h2 className="text-lg font-bold mb-4">Corregir Venta</h2>
+            <p className="text-xs text-gray-500 mb-6">
+              Esta acción modificará la venta finalizada. Se actualizarán los totales en caja y en caso de fiado, se ajustará la deuda del cliente.
+            </p>
+
+            <form onSubmit={handleCorregirVenta} className="space-y-4">
+              <div>
+                <label className="block text-xs font-bold text-gray-500 mb-1">Total de la Venta ($)</label>
+                <input
+                  type="number"
+                  value={editSaleTotal}
+                  onChange={(e) => setEditSaleTotal(e.target.value)}
+                  onFocus={(e) => e.target.select()}
+                  className="w-full px-4 py-3 rounded-xl border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-750 text-sm outline-none focus:ring-2 focus:ring-blue-500"
+                  required
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-gray-500 mb-1">Método de Pago</label>
+                <select
+                  value={editSaleMethod}
+                  onChange={(e) => setEditSaleMethod(e.target.value as any)}
+                  className="w-full px-4 py-3 rounded-xl border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-750 text-sm outline-none focus:ring-2 focus:ring-blue-500"
+                >
+                  <option value="CASH">Efectivo</option>
+                  <option value="NEQUI">Nequi / Transferencia</option>
+                  <option value="FIADO">Fiado</option>
+                </select>
+              </div>
+
+              {editSaleMethod === 'FIADO' && (
+                <div className="p-4 bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-700/50 rounded-2xl space-y-3">
+                  <h3 className="text-sm font-bold text-yellow-800 dark:text-yellow-500">Asignar Fiado a Cliente</h3>
+                  
+                  {editSaleCustomerId ? (
+                    <div className="flex items-center justify-between p-3 bg-white dark:bg-gray-800 rounded-xl border border-yellow-200 dark:border-yellow-700">
+                      <div>
+                        <p className="text-sm font-bold">{editSaleCustomerName}</p>
+                        <p className="text-xs text-gray-500">C.C. {editSaleCustomerDoc}</p>
+                      </div>
+                      <button type="button" onClick={() => setEditSaleCustomerId(null)} className="text-xs font-bold text-red-500">
+                        Cambiar
+                      </button>
+                    </div>
+                  ) : (
+                    <>
+                      <div>
+                        <label className="block text-xs text-gray-500 mb-1">Cédula del Cliente</label>
+                        <input
+                          type="text"
+                          value={editSaleCustomerDoc}
+                          onChange={(e) => {
+                            const val = e.target.value;
+                            setEditSaleCustomerDoc(val);
+                            const found = customers.find(c => c.cedula === val);
+                            if (found) {
+                              setEditSaleCustomerId(found.id);
+                              setEditSaleCustomerName(found.name);
+                              setEditSaleCustomerPhone(found.phone || '');
+                            }
+                          }}
+                          placeholder="Ej. 1140888999"
+                          className="w-full px-3 py-2 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-750 text-sm"
+                        />
+                      </div>
+                      {!editSaleCustomerId && editSaleCustomerDoc.length >= 5 && (
+                        <>
+                          <div>
+                            <label className="block text-xs text-gray-500 mb-1">Nombre Completo</label>
+                            <input
+                              type="text"
+                              value={editSaleCustomerName}
+                              onChange={(e) => setEditSaleCustomerName(e.target.value)}
+                              placeholder="Nombre del nuevo cliente"
+                              className="w-full px-3 py-2 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-750 text-sm"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-xs text-gray-500 mb-1">Celular (Opcional)</label>
+                            <input
+                              type="text"
+                              value={editSaleCustomerPhone}
+                              onChange={(e) => setEditSaleCustomerPhone(e.target.value)}
+                              placeholder="Ej. 3001234567"
+                              className="w-full px-3 py-2 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-750 text-sm"
+                            />
+                          </div>
+                          <p className="text-[10px] text-yellow-600 dark:text-yellow-400">Si el cliente no existe, se creará automáticamente.</p>
+                        </>
+                      )}
+                    </>
+                  )}
+                </div>
+              )}
+
+              <button
+                type="submit"
+                disabled={processingEditSale}
+                className="w-full py-3 mt-4 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-bold text-sm transition disabled:opacity-50"
+              >
+                {processingEditSale ? 'Guardando...' : 'Guardar Cambios'}
+              </button>
+            </form>
+          </div>
+        </div>
+      )}
+
     </div>
   );
 }
