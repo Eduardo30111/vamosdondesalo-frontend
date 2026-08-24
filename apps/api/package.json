@@ -33,9 +33,7 @@
     "socket.io": "^4.8.0",
     "cloudinary": "^2.5.0",
     "multer": "^1.4.5-lts.1",
-    "qrcode": "^1.5.3"
-  },
-  "devDependencies": {
+    "qrcode": "^1.5.3",
     "@nestjs/cli": "^10.4.0",
     "@nestjs/schematics": "^10.2.0",
     "@types/bcrypt": "^5.0.2",
