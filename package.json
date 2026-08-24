@@ -5,8 +5,8 @@
   "packageManager": "pnpm@9.15.4",
   "scripts": {
     "dev": "docker compose up",
-    "prebuild": "corepack enable && pnpm install --no-frozen-lockfile",
-    "build": "pnpm -r build",
+    "prebuild": "npx pnpm install --no-frozen-lockfile",
+    "build": "npx pnpm -r build",
     "seed": "docker compose exec api pnpm run seed",
     "db:migrate": "docker compose exec api pnpm run db:migrate",
     "db:reset": "docker compose exec api pnpm run db:reset",
