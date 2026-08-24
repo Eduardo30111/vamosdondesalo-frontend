@@ -881,6 +881,7 @@ export class OrdersService {
     let newPaymentStatus: any = 'UNPAID';
     let isFiated = false;
 
+    let updateCustomerData: any = {};
     if (dto.paymentMethod === 'FIADO') {
       newPaymentStatus = 'FIADO';
       isFiated = true;
@@ -902,8 +903,14 @@ export class OrdersService {
       }
 
       if (!customer) {
-        throw new BadRequestException('Se requiere un cliente para fiar la venta');
+        throw new BadRequestException('Se requiere un cliente válido para fiar la venta');
       }
+
+      updateCustomerData = {
+        customerName: customer.name,
+        customerDoc: customer.cedula,
+        customerPhone: customer.phone || order.customerPhone,
+      };
 
       // Add new debt to customer
       await this.prisma.customer.update({
@@ -928,6 +935,7 @@ export class OrdersService {
         total: dto.total,
         paymentStatus: newPaymentStatus,
         isFiated,
+        ...updateCustomerData,
         updatedAt: new Date()
       },
       include: { items: { include: { product: true } }, table: true, deliveryZone: true, payments: true }

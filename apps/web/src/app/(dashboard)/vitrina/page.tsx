@@ -1900,65 +1900,76 @@ export default function VitrinaPage() {
 
               {editSaleMethod === 'FIADO' && (
                 <div className="p-4 bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-700/50 rounded-2xl space-y-3">
-                  <h3 className="text-sm font-bold text-yellow-800 dark:text-yellow-500">Asignar Fiado a Cliente</h3>
+                  <h3 className="text-sm font-bold text-yellow-800 dark:text-yellow-500">Asignar Deuda de Fiado</h3>
                   
-                  {editSaleCustomerId ? (
-                    <div className="flex items-center justify-between p-3 bg-white dark:bg-gray-800 rounded-xl border border-yellow-200 dark:border-yellow-700">
-                      <div>
-                        <p className="text-sm font-bold">{editSaleCustomerName}</p>
-                        <p className="text-xs text-gray-500">C.C. {editSaleCustomerDoc}</p>
-                      </div>
-                      <button type="button" onClick={() => setEditSaleCustomerId(null)} className="text-xs font-bold text-red-500">
-                        Cambiar
-                      </button>
-                    </div>
-                  ) : (
-                    <>
-                      <div>
-                        <label className="block text-xs text-gray-500 mb-1">Cédula del Cliente</label>
-                        <input
-                          type="text"
-                          value={editSaleCustomerDoc}
-                          onChange={(e) => {
-                            const val = e.target.value;
-                            setEditSaleCustomerDoc(val);
-                            const found = customers.find(c => c.cedula === val);
+                  {customers.length > 0 && (
+                    <div>
+                      <label className="block text-xs font-bold text-gray-600 dark:text-gray-400 mb-1">Seleccionar Cliente Existente</label>
+                      <select
+                        value={editSaleCustomerId || ''}
+                        onChange={(e) => {
+                          const val = e.target.value;
+                          if (!val) {
+                            setEditSaleCustomerId(null);
+                            setEditSaleCustomerName('');
+                            setEditSaleCustomerDoc('');
+                            setEditSaleCustomerPhone('');
+                          } else {
+                            const found = customers.find(c => c.id === val);
                             if (found) {
                               setEditSaleCustomerId(found.id);
                               setEditSaleCustomerName(found.name);
+                              setEditSaleCustomerDoc(found.cedula);
                               setEditSaleCustomerPhone(found.phone || '');
                             }
-                          }}
+                          }
+                        }}
+                        className="w-full px-3 py-2 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-750 text-sm outline-none focus:ring-2 focus:ring-yellow-500"
+                      >
+                        <option value="">-- Crear Nuevo Cliente --</option>
+                        {customers.map((c) => (
+                          <option key={c.id} value={c.id}>
+                            {c.name} (C.C. {c.cedula}) - Deuda: ${(c.totalDebt || 0).toLocaleString('es-CO')}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
+
+                  {!editSaleCustomerId && (
+                    <div className="space-y-2 pt-1 border-t border-yellow-200/60 dark:border-yellow-700/40">
+                      <p className="text-xs font-bold text-yellow-800 dark:text-yellow-400">Datos de Nuevo Cliente:</p>
+                      <div>
+                        <label className="block text-xs text-gray-500 mb-1">Cédula / Documento</label>
+                        <input
+                          type="text"
+                          value={editSaleCustomerDoc}
+                          onChange={(e) => setEditSaleCustomerDoc(e.target.value)}
                           placeholder="Ej. 1140888999"
                           className="w-full px-3 py-2 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-750 text-sm"
                         />
                       </div>
-                      {!editSaleCustomerId && editSaleCustomerDoc.length >= 5 && (
-                        <>
-                          <div>
-                            <label className="block text-xs text-gray-500 mb-1">Nombre Completo</label>
-                            <input
-                              type="text"
-                              value={editSaleCustomerName}
-                              onChange={(e) => setEditSaleCustomerName(e.target.value)}
-                              placeholder="Nombre del nuevo cliente"
-                              className="w-full px-3 py-2 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-750 text-sm"
-                            />
-                          </div>
-                          <div>
-                            <label className="block text-xs text-gray-500 mb-1">Celular (Opcional)</label>
-                            <input
-                              type="text"
-                              value={editSaleCustomerPhone}
-                              onChange={(e) => setEditSaleCustomerPhone(e.target.value)}
-                              placeholder="Ej. 3001234567"
-                              className="w-full px-3 py-2 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-750 text-sm"
-                            />
-                          </div>
-                          <p className="text-[10px] text-yellow-600 dark:text-yellow-400">Si el cliente no existe, se creará automáticamente.</p>
-                        </>
-                      )}
-                    </>
+                      <div>
+                        <label className="block text-xs text-gray-500 mb-1">Nombre Completo</label>
+                        <input
+                          type="text"
+                          value={editSaleCustomerName}
+                          onChange={(e) => setEditSaleCustomerName(e.target.value)}
+                          placeholder="Ej. Juan Pérez"
+                          className="w-full px-3 py-2 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-750 text-sm"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-xs text-gray-500 mb-1">Teléfono / Celular (Opcional)</label>
+                        <input
+                          type="text"
+                          value={editSaleCustomerPhone}
+                          onChange={(e) => setEditSaleCustomerPhone(e.target.value)}
+                          placeholder="Ej. 3001234567"
+                          className="w-full px-3 py-2 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-750 text-sm"
+                        />
+                      </div>
+                    </div>
                   )}
                 </div>
               )}
