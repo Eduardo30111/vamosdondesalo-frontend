@@ -23,7 +23,6 @@
     "@nestjs/platform-socket.io": "^10.4.0",
     "@nestjs/websockets": "^10.4.0",
     "@prisma/client": "^5.22.0",
-    "@salo/shared": "workspace:*",
     "bcrypt": "^5.1.1",
     "class-transformer": "^0.5.1",
     "class-validator": "^0.14.1",
